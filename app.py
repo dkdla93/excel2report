@@ -443,7 +443,7 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                             message.attach(MIMEText(body, "plain"))
                             
                             # PDF 보고서 첨부
-                            attachment = MIMEApplication(pdf_content.encode('utf-8'), _subtype="pdf")
+                            attachment = MIMEApplication(pdf_content, _subtype="pdf")
                             attachment.add_header('Content-Disposition', 'attachment', 
                                                 filename=f'{creator_id}_report.pdf')
                             message.attach(attachment)
