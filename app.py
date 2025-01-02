@@ -537,20 +537,26 @@ def create_validation_excel(original_df, processed_df, creator_info_handler):
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
-        # 가로(A4 Landscape) 설정
+        # 가로(A4 Landscape) 설정 및 폰트 설정
         landscape_css = CSS(string="""
+            @font-face {
+                font-family: 'NanumGothic';
+                src: local('NanumGothic');
+            }
+            
             @page {
                 size: A4 landscape;
                 margin: 10mm;
             }
+            
             body {
-                font-family: Arial, sans-serif;
+                font-family: 'NanumGothic', 'Noto Sans CJK KR', sans-serif;
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
             }
         """)
-        
+
         # HTML 문자열에서 직접 PDF 생성
         pdf_buffer = BytesIO()
         HTML(string=html_content).write_pdf(pdf_buffer, stylesheets=[landscape_css])
