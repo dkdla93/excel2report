@@ -434,10 +434,10 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                             
                             body = f"""안녕하세요, {creator_id} 크리에이터님
 
-                첨부된 파일을 통해 음원 사용현황을 확인해주세요.
-                문의사항이 있으시면 언제든 연락 주시기 바랍니다.
+첨부된 파일을 통해 음원 사용현황을 확인해주세요.
+문의사항이 있으시면 언제든 연락 주시기 바랍니다.
 
-                감사합니다."""
+감사합니다."""
                             
                             message.attach(MIMEText(body, "plain"))
                             
