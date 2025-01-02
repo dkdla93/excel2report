@@ -335,7 +335,7 @@ def create_video_data(df):
         })
     return video_data
 
-def process_data(input_df, creator_info_handler, start_date, end_date, gmail_api=None, send_email=False,
+def process_data(input_df, creator_info_handler, start_date, end_date, gmail_credentials=None, send_email=False,
                 progress_container=None, status_container=None, validation_container=None):
     """데이터를 처리하고 보고서를 생성합니다."""
     reports_data = {}
@@ -423,11 +423,38 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_api
                 html_content = generate_html_report(report_data)
                 reports_data[f"{creator_id}_report.html"] = html_content
                 
-                # 이메일 발송
-                if send_email and gmail_api:
-                    email = creator_info_handler.get_email(creator_id)
-                    if email:
-                        gmail_api.send_report(email, creator_id, html_content.encode('utf-8'))
+
+                if send_email and gmail_credentials:
+                    email_service_url = "https://your-render-service.onrender.com/send-email"
+                    
+                    for creator_id, content in reports_data.items():
+                        try:
+                            email = creator_info_handler.get_email(creator_id)
+                            if not email:
+                                continue
+
+                            files = {
+                                'report_file': (f'{creator_id}_report.html', content, 'text/html'),
+                                'credentials_file': ('credentials.json', gmail_credentials.getvalue(), 'application/json'),
+                            }
+                            data = {
+                                'to_email': email,
+                                'creator_name': creator_id,
+                            }
+
+                            response = requests.post(email_service_url, files=files, data=data)
+                            
+                            if response.status_code != 200:
+                                failed_creators.append(creator_id)
+                                if status_container:
+                                    st.error(f"이메일 발송 실패 ({creator_id}): {response.json()['detail']}")
+                            else:
+                                st.success(f"{creator_id} 크리에이터에게 이메일 발송 완료")
+
+                        except Exception as e:
+                            failed_creators.append(creator_id)
+                            if status_container:
+                                st.error(f"{creator_id} 크리에이터 이메일 발송 중 오류 발생: {str(e)}")
                 
             except Exception as e:
                 failed_creators.append(creator_id)  # 실패 목록에 추가
