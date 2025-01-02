@@ -614,27 +614,5 @@ def main():
             st.warning("필요한 파일을 모두 업로드해주세요.")
 
 
-    # 이메일 설정 섹션
-    st.header("3️⃣ 이메일 발송 설정")
-    send_email = st.checkbox("보고서를 이메일로 발송하기")
-    email_user = None
-    email_password = None
-
-    if send_email:
-        st.info("""
-        이메일 발송을 위해 Gmail 계정 설정이 필요합니다:
-        1. Gmail 계정 (일반 구글 계정)
-        2. 앱 비밀번호 생성 방법:
-        - Google 계정 관리 → 보안 → 2단계 인증 → 앱 비밀번호
-        - '앱 선택'에서 '기타' 선택 후 앱 비밀번호 생성
-        """)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            email_user = st.text_input("Gmail 계정", placeholder="example@gmail.com")
-        with col2:
-            email_password = st.text_input("Gmail 앱 비밀번호", type="password")
-
-
 if __name__ == "__main__":
     main()
