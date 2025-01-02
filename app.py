@@ -518,9 +518,31 @@ def main():
     creator_info = st.file_uploader("크리에이터 정보 파일 (creator_info.xlsx)", type=['xlsx'])
     statistics = st.file_uploader("통계 데이터 파일 (creator_statistics.xlsx)", type=['xlsx'])
 
+    # 이메일 발송 설정 섹션 (파일 업로드 다음에 배치)
+    st.header("2️⃣ 이메일 발송 설정")
+    send_email = st.checkbox("보고서를 이메일로 발송하기")
+    email_user = None
+    email_password = None
+
+    if send_email:
+        st.info("""
+        이메일 발송을 위해 Gmail 계정 설정이 필요합니다:
+        1. Gmail 계정 (일반 구글 계정)
+        2. 앱 비밀번호 생성 방법:
+           - Google 계정 관리 → 보안 → 2단계 인증 → 앱 비밀번호
+           - '앱 선택'에서 '기타' 선택 후 앱 비밀번호 생성
+        """)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            email_user = st.text_input("Gmail 계정", placeholder="example@gmail.com")
+        with col2:
+            email_password = st.text_input("Gmail 앱 비밀번호", type="password")
+
+
     # 데이터 검증 섹션
     if creator_info and statistics:
-        st.header("2️⃣ 데이터 검증")
+        st.header("3️⃣ 데이터 검증")
         creator_info_handler = CreatorInfoHandler(creator_info)
         statistics_df = pd.read_excel(statistics, header=0)
         validator = DataValidator(statistics_df, creator_info_handler)
@@ -554,8 +576,9 @@ def main():
             use_container_width=True
         )
         
-        # 보고서 생성 버튼
-        st.header("3️⃣ 보고서 생성")
+       
+       # 보고서 생성 버튼
+        st.header("4️⃣ 보고서 생성")
         if st.button("보고서 생성 시작", type="primary"):
             try:
                 tab1, tab2 = st.tabs(["처리 진행 상황", "검증 결과"])
@@ -585,6 +608,7 @@ def main():
             except Exception as e:
                 st.error(f"처리 중 오류가 발생했습니다: {str(e)}")
                 st.write(traceback.format_exc())
+       
         else:
             st.warning("필요한 파일을 모두 업로드해주세요.")
 
