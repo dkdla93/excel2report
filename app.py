@@ -341,7 +341,7 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
     reports_data = {}
     excel_files = {}
     processed_full_data = pd.DataFrame()
-    failed_creators = []  # 실패한 크리에이터 목록 추가
+    failed_creators = []
     
     try:
         # 진행 상태 표시 초기화
@@ -349,9 +349,9 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
         if progress_container:
             progress_bar = progress_container.progress(0)
             progress_status = progress_container.empty()
-            progress_text = progress_container.empty()  # 진행 상태 텍스트를 위한 placeholder
-            failed_status = progress_container.empty()  # 실패 상태를 위한 placeholder
-            download_button = progress_container.empty()  # 다운로드 버튼을 위한 placeholder
+            progress_text = progress_container.empty()
+            failed_status = progress_container.empty()
+            download_button = progress_container.empty()
             progress_status.write("처리 전")
         
         if status_container:
@@ -369,7 +369,7 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
                 # 해당 크리에이터의 데이터만 필터링
                 creator_data = input_df[input_df['아이디'] == creator_id].copy()
                 if creator_data.empty:
-                    failed_creators.append(creator_id)  # 실패 목록에 추가
+                    failed_creators.append(creator_id)
                     if status_container:
                         status_container.warning(f"{creator_id} 크리에이터의 데이터가 없습니다.")
                     continue
@@ -386,10 +386,10 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
                 total_revenue_before = clean_numeric_value(creator_data['대략적인 파트너 수익 (KRW)'].sum())
                 total_revenue_after = int(total_revenue_before * commission_rate)
                 
-                # 전체 데이터를 누적하는 processed_full_data는 필터링 전에 기록
+                # 전체 데이터 누적
                 processed_full_data = pd.concat([processed_full_data, creator_data])
                 
-                # 상위 50개 조회수를 필터링하여 Excel에만 사용
+                # 상위 50개 조회수 필터링
                 filtered_data = creator_data.nlargest(50, '조회수').copy()
                 filtered_data['수수료 제외 후 수익'] = filtered_data['대략적인 파트너 수익 (KRW)'] * commission_rate
                 
@@ -413,70 +413,68 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
                 report_data = {
                     'creatorName': creator_id,
                     'period': f"{start_date.strftime('%y.%m.%d')} - {end_date.strftime('%y.%m.%d')}",
-                    'totalRevenueBefore': total_revenue_before,  # 수수료 제외 전 총수익 추가
-                    'totalRevenue': total_revenue_after,        # 기존 수수료 제외 후 총수익
+                    'totalRevenueBefore': total_revenue_before,
+                    'totalRevenue': total_revenue_after,
                     'totalViews': total_views,
-                    'videoData': create_video_data(filtered_data[:-1])  # 총계 행 제외
+                    'videoData': create_video_data(filtered_data[:-1])
                 }
                 
                 # HTML 생성
                 html_content = generate_html_report(report_data)
                 reports_data[f"{creator_id}_report.html"] = html_content
                 
-
-                if send_email and gmail_credentials:
-                    email_service_url = "https://your-render-service.onrender.com/send-email"
-                    
-                    for creator_id, content in reports_data.items():
-                        try:
-                            email = creator_info_handler.get_email(creator_id)
-                            if not email:
-                                continue
-
-                            files = {
-                                'report_file': (f'{creator_id}_report.html', content, 'text/html'),
-                                'credentials_file': ('credentials.json', gmail_credentials.getvalue(), 'application/json'),
-                            }
-                            data = {
-                                'to_email': email,
-                                'creator_name': creator_id,
-                            }
-
-                            response = requests.post(email_service_url, files=files, data=data)
-                            
-                            if response.status_code != 200:
-                                failed_creators.append(creator_id)
-                                if status_container:
-                                    st.error(f"이메일 발송 실패 ({creator_id}): {response.json()['detail']}")
-                            else:
-                                st.success(f"{creator_id} 크리에이터에게 이메일 발송 완료")
-
-                        except Exception as e:
-                            failed_creators.append(creator_id)
-                            if status_container:
-                                st.error(f"{creator_id} 크리에이터 이메일 발송 중 오류 발생: {str(e)}")
-                
             except Exception as e:
-                failed_creators.append(creator_id)  # 실패 목록에 추가
+                failed_creators.append(creator_id)
                 if status_container:
                     status_container.error(f"{creator_id} 크리에이터 처리 중 오류 발생: {str(e)}")
                 continue
-                
+        
+        # 이메일 발송 처리 (메인 루프 밖에서 처리)
+        if send_email:
+            email_service_url = "https://auto-email-ynl2.onrender.com/send-email"
+            for creator_id, html_content in reports_data.items():
+                try:
+                    email = creator_info_handler.get_email(creator_id)
+                    if not email:
+                        st.warning(f"{creator_id} 크리에이터의 이메일 주소가 없습니다.")
+                        continue
+
+                    # 이메일 발송
+                    files = {
+                        'report_file': (f'{creator_id}_report.html', html_content.encode('utf-8'), 'text/html')
+                    }
+                    data = {
+                        'to_email': email,
+                        'creator_name': creator_id
+                    }
+
+                    response = requests.post(
+                        email_service_url, 
+                        files=files, 
+                        data=data,
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        st.success(f"{creator_id} 크리에이터에게 이메일 발송 완료")
+                    else:
+                        error_msg = response.json().get('detail', '알 수 없는 오류')
+                        st.error(f"{creator_id} 크리에이터 이메일 발송 실패: {error_msg}")
+                        failed_creators.append(creator_id)
+
+                except Exception as e:
+                    st.error(f"{creator_id} 크리에이터 이메일 발송 중 오류 발생: {str(e)}")
+                    failed_creators.append(creator_id)
+        
         # 모든 처리 완료 후 상태 업데이트
         if progress_container:
             progress_status.write("처리 완료")
             progress_text.write(f"진행 상황: {total_creators}/{total_creators} - 처리 완료")
             failed_status.write(f"실패: {', '.join(failed_creators) if failed_creators else 'None'}")
             
-            # ZIP 파일 생성 및 다운로드 버튼 추가
+            # ZIP 파일 생성 및 다운로드 버튼
             if reports_data and excel_files:
-                zip_data = create_zip_file(
-                    reports_data,
-                    excel_files,
-                    input_df,  # 원본 데이터 추가
-                    processed_full_data,  # 처리된 데이터 추가
-                    creator_info_handler  # 크리에이터 정보 핸들러 추가
-                )
+                zip_data = create_zip_file(reports_data, excel_files, input_df, processed_full_data, creator_info_handler)
                 download_button.download_button(
                     label="보고서 다운로드",
                     data=zip_data,
