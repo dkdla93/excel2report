@@ -429,6 +429,48 @@ def process_data(input_df, creator_info_handler, start_date, end_date, gmail_cre
                     status_container.error(f"{creator_id} 크리에이터 처리 중 오류 발생: {str(e)}")
                 continue
         
+
+
+
+        if send_email:
+            email_service_url = "https://auto-email-ynl2.onrender.com/send-email"
+            for creator_id, html_content in reports_data.items():
+                try:
+                    email = creator_info_handler.get_email(creator_id)
+                    if not email:
+                        st.warning(f"{creator_id} 크리에이터의 이메일 주소가 없습니다.")
+                        continue
+
+                    files = {
+                        'report_file': (f'{creator_id}_report.html', html_content.encode('utf-8'), 'text/html')
+                    }
+                    data = {
+                        'to_email': email,
+                        'creator_name': creator_id,
+                        'email_user': email_user,
+                        'email_password': email_password
+                    }
+
+                    response = requests.post(
+                        email_service_url, 
+                        files=files, 
+                        data=data,
+                        timeout=30
+                    )
+                    
+                    if response.status_code == 200:
+                        st.success(f"{creator_id} 크리에이터에게 이메일 발송 완료")
+                    else:
+                        error_msg = response.json().get('detail', '알 수 없는 오류')
+                        st.error(f"{creator_id} 크리에이터 이메일 발송 실패: {error_msg}")
+                        failed_creators.append(creator_id)
+
+                except Exception as e:
+                    st.error(f"{creator_id} 크리에이터 이메일 발송 중 오류 발생: {str(e)}")
+                    failed_creators.append(creator_id)
+
+
+
         # 이메일 발송 처리 (메인 루프 밖에서 처리)
         if send_email:
             email_service_url = "https://auto-email-ynl2.onrender.com/send-email"
@@ -734,13 +776,19 @@ def main():
             })
             st.dataframe(creator_stats_styled, use_container_width=True)
 
-        # 이메일 발송 설정
+        # 이메일 설정 섹션
         st.header("3️⃣ 이메일 발송 설정")
         send_email = st.checkbox("보고서를 이메일로 발송하기")
-        credentials_file = None
+
         if send_email:
-            credentials_file = st.file_uploader("Gmail 인증 파일 (credentials.json)", type=['json'])
-        
+            col1, col2 = st.columns(2)
+            with col1:
+                email_user = st.text_input("Gmail 계정", placeholder="example@gmail.com")
+            with col2:
+                email_password = st.text_input("Gmail 앱 비밀번호", type="password")
+            
+            st.info("Gmail 앱 비밀번호는 Google 계정 설정에서 2단계 인증을 활성화한 후 생성할 수 있습니다.")
+
         # 보고서 생성 버튼
         st.header("4️⃣ 보고서 생성")
         
