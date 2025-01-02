@@ -413,6 +413,11 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 if html_content:
                     reports_data[f"{creator_id}_report.html"] = html_content
                 
+                # PDF 보고서 생성
+                pdf_content = create_pdf_from_html(html_content, creator_id)
+                if pdf_content:
+                    reports_data[f"{creator_id}_report.pdf"] = pdf_content
+
                 # 이메일 발송 처리
                 if send_email and email_user and email_password:
                     try:
@@ -437,10 +442,10 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                             
                             message.attach(MIMEText(body, "plain"))
                             
-                            # HTML 보고서 첨부
-                            attachment = MIMEApplication(html_content.encode('utf-8'), _subtype="html")
+                            # PDF 보고서 첨부
+                            attachment = MIMEApplication(pdf_content.encode('utf-8'), _subtype="pdf")
                             attachment.add_header('Content-Disposition', 'attachment', 
-                                                filename=f'{creator_id}_report.html')
+                                                filename=f'{creator_id}_report.pdf')
                             message.attach(attachment)
                             
                             # 이메일 발송
