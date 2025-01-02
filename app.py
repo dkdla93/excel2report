@@ -490,6 +490,7 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
         
     return reports_data, excel_files
 
+
 def main():
     st.title("크리에이터 정산 보고서 생성기")
     
@@ -500,8 +501,9 @@ def main():
         2. 크리에이터 정보 파일(`creator_info.xlsx`) 업로드
         3. 통계 데이터 파일(`creator_statistics.xlsx`) 업로드
         4. 업로드된 데이터 검증 결과 확인
-        5. 보고서 생성 버튼 클릭
-        6. 처리 결과 검증 확인 후 보고서 다운로드
+        5. 필요시 이메일 발송 설정
+        6. 보고서 생성 버튼 클릭
+        7. 처리 결과 검증 확인 후 보고서 다운로드
         """)
     
     # 파일 업로드 섹션
@@ -515,12 +517,12 @@ def main():
     with col2:
         end_date = st.date_input("종료일", format="YYYY-MM-DD")
 
-    creator_info = st.file_uploader("크리에이터 정보 파일 (creator_info.xlsx)", type=['xlsx'])
-    statistics = st.file_uploader("통계 데이터 파일 (creator_statistics.xlsx)", type=['xlsx'])
+    creator_info = st.file_uploader("크리에이터 정보 파일 (creator_info.xlsx)", type=['xlsx'], key="creator_info")
+    statistics = st.file_uploader("통계 데이터 파일 (creator_statistics.xlsx)", type=['xlsx'], key="statistics")
 
-    # 이메일 발송 설정 섹션 (파일 업로드 다음에 배치)
+    # 이메일 발송 설정 섹션
     st.header("2️⃣ 이메일 발송 설정")
-    send_email = st.checkbox("보고서를 이메일로 발송하기")
+    send_email = st.checkbox("보고서를 이메일로 발송하기", key="send_email_checkbox")
     email_user = None
     email_password = None
 
@@ -535,9 +537,9 @@ def main():
         
         col1, col2 = st.columns(2)
         with col1:
-            email_user = st.text_input("Gmail 계정", placeholder="example@gmail.com")
+            email_user = st.text_input("Gmail 계정", placeholder="example@gmail.com", key="email_user")
         with col2:
-            email_password = st.text_input("Gmail 앱 비밀번호", type="password")
+            email_password = st.text_input("Gmail 앱 비밀번호", type="password", key="email_password")
 
 
     # 데이터 검증 섹션
@@ -575,11 +577,10 @@ def main():
             ),
             use_container_width=True
         )
-        
        
-       # 보고서 생성 버튼
+        # 보고서 생성 버튼
         st.header("4️⃣ 보고서 생성")
-        if st.button("보고서 생성 시작", type="primary"):
+        if st.button("보고서 생성 시작", type="primary", key="generate_report"):
             try:
                 tab1, tab2 = st.tabs(["처리 진행 상황", "검증 결과"])
                 
