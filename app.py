@@ -259,7 +259,6 @@ def create_pdf_from_html(html_content, creator_id):
         return pdf_buffer.getvalue()
         
     except Exception as e:
-        st.error(f"PDF 생성 중 오류 발생 ({creator_id}): {str(e)}")
         return None
 
 def create_validation_excel(original_df, processed_df, creator_info_handler):
