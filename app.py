@@ -222,8 +222,9 @@ def create_video_data(df):
         video_data.append({
             'title': str(row['동영상 제목']),
             'views': clean_number(row['조회수']),
-            'revenue': revenue_after,
-            'revenueBefore': revenue_before  # 수수료 적용 전 수익 추가
+            'revenueBefore': revenue_before,  # 수수료 적용 전 수익
+            'revenueAfter': revenue_after,    # 수수료 적용 후 수익
+            'revenue': revenue_after          # 기존 템플릿 호환성 유지
         })
     return video_data
 
@@ -238,13 +239,15 @@ def generate_html_report(data):
         template.globals['format_number'] = lambda x: "{:,}".format(int(x)) if x is not None else "0"
         
         # 수익 데이터 계산
-        total_revenue = sum(video['revenue'] for video in data['videoData'])
         total_revenue_before = sum(video['revenueBefore'] for video in data['videoData'])
+        total_revenue_after = sum(video['revenueAfter'] for video in data['videoData'])
         
         # 데이터에 수익 정보 추가
         data.update({
-            'totalRevenue': total_revenue,
-            'totalRevenueBefore': total_revenue_before
+            'totalRevenueBefore': total_revenue_before,
+            'totalRevenueAfter': total_revenue_after,
+            'totalRevenue': total_revenue_after,  # 기존 템플릿 호환성 유지
+            'commission_rate': 0.7  # 수수료율 추가
         })
         
         return template.render(**data)
