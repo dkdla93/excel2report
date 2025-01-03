@@ -14,6 +14,8 @@ import numpy as np
 from weasyprint import HTML, CSS
 import requests
 import smtplib
+from email.header import Header
+from email.utils import formataddr
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -214,8 +216,7 @@ def create_video_data(df):
         video_data.append({
             'title': str(row['동영상 제목']),
             'views': clean_numeric_value(row['조회수']),
-            'revenueBefore': clean_numeric_value(row['대략적인 파트너 수익 (KRW)']),
-            'revenueAfter': clean_numeric_value(row['수수료 제외 후 수익'])
+            'revenue': clean_numeric_value(row['수수료 제외 후 수익'])  # 수수료 제외 후 수익만 사용
         })
     return video_data
 
@@ -239,29 +240,126 @@ def generate_html_report(data):
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
-        landscape_css = CSS(string="""
+        portrait_css = CSS(string="""
             @font-face {
                 font-family: 'NanumGothic';
                 src: local('NanumGothic');
             }
+            @font-face {
+                font-family: 'Noto Sans';
+                src: local('Noto Sans');
+            }
+            @font-face {
+                font-family: 'Noto Sans CJK JP';
+                src: local('Noto Sans CJK JP');
+            }
+            @font-face {
+                font-family: 'Noto Sans CJK SC';
+                src: local('Noto Sans CJK SC');
+            }
             @page {
-                size: A4 landscape;
-                margin: 10mm;
+                size: A4 portrait;
+                margin: 8mm;
             }
             body {
-                font-family: 'NanumGothic', 'Noto Sans CJK KR', sans-serif;
+                font-family: 'NanumGothic', 'Noto Sans', 'Noto Sans CJK JP', 'Noto Sans CJK SC', sans-serif;
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
+            .report-container {
+                max-width: 100%;
+                padding: 8px;
+            }
+            .header {
+                margin-bottom: 12px;
+            }
+            .header h1 {
+                font-size: 21px !important;
+                margin-bottom: 6px;
+                line-height: 1.2;
+                font-weight: bold;
+            }
+            .header .period {
+                font-size: 13px;
+                margin: 6px 0;
+            }
+            .header .disclaimer {
+                font-size: 11px;
+                margin: 4px 0;
+                line-height: 1.3;
+            }
+            .stats-grid {
+                max-width: 100%;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+            .stat-card {
+                padding: 10px;
+            }
+            .stat-card h3 {
+                font-size: 13px;
+                margin-bottom: 4px;
+            }
+            .stat-card .value {
+                font-size: 18px;
+            }
+            .earnings-table {
+                margin-top: 10px;
+                font-size: 0.7em;
+                border-spacing: 0;
+                border-collapse: collapse;
+            }
+            .earnings-table th {
+                font-size: 0.95em;
+                padding: 2px 3px;
+                line-height: 1;
+            }
+            .earnings-table td {
+                padding: 1px 3px;
+                line-height: 1;
+            }
+            .earnings-table th:first-child,
+            .earnings-table td:first-child {
+                padding-left: 0;
+            }
+            .earnings-table th:last-child,
+            .earnings-table td:last-child {
+                padding-right: 0;
+            }
+            .earnings-table tr {
+                height: auto !important;
+                border-bottom: 0.5px solid #e9ecef;
+            }
+            .earnings-table tbody tr {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .earnings-table th,
+            .earnings-table td {
+                margin: 0 !important;
+                vertical-align: middle;
             }
         """)
         
+        # WeasyPrint 설정에 폰트 설정 추가
+        from weasyprint.text.fonts import FontConfiguration
+        font_config = FontConfiguration()
+        
         pdf_buffer = BytesIO()
-        HTML(string=html_content).write_pdf(pdf_buffer, stylesheets=[landscape_css])
+        HTML(string=html_content).write_pdf(
+            pdf_buffer,
+            stylesheets=[portrait_css],
+            font_config=font_config,
+            presentational_hints=True
+        )
         pdf_buffer.seek(0)
         return pdf_buffer.getvalue()
         
     except Exception as e:
+        print(f"PDF 생성 중 오류 발생: {str(e)}")  # 디버깅을 위한 오류 출력 추가
         return None
 
 def create_validation_excel(original_df, processed_df, creator_info_handler):
@@ -404,9 +502,8 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 report_data = {
                     'creatorName': creator_id,
                     'period': f"{start_date.strftime('%y.%m.%d')} - {end_date.strftime('%y.%m.%d')}",
-                    'totalRevenueBefore': total_revenue_before,
-                    'totalRevenue': total_revenue_after,
                     'totalViews': total_views,
+                    'totalRevenue': total_revenue_after,  # 수수료 제외 후 수익만 사용
                     'videoData': create_video_data(filtered_data[:-1])
                 }
                 
@@ -493,7 +590,8 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
         st.write(traceback.format_exc())
         return None, None, None
 
-def send_creator_emails(reports_data, creator_info_handler, email_user, email_password):
+def send_creator_emails(reports_data, creator_info_handler, email_user, email_password, 
+                       email_subject_template, email_body_template):
     """크리에이터들에게 이메일을 발송합니다."""
     failed_creators = []
     
@@ -525,23 +623,18 @@ def send_creator_emails(reports_data, creator_info_handler, email_user, email_pa
                 
                 # 이메일 메시지 생성
                 msg = MIMEMultipart()
-                msg["From"] = email_user
+                msg["From"] = formataddr(("이스트블루", email_user))  # 보내는 사람 이름 설정
                 msg["To"] = email
-                msg["Subject"] = f"{creator_id} 크리에이터님의 음원 사용현황 보고서"
+                msg["Subject"] = Header(email_subject_template.format(creator_id=creator_id), 'utf-8')  # 제목 인코딩
                 
-                body = f"""안녕하세요, {creator_id} 크리에이터님
-
-첨부된 파일을 통해 음원 사용현황을 확인해주세요.
-문의사항이 있으시면 언제든 연락 주시기 바랍니다.
-
-감사합니다."""
-                
-                msg.attach(MIMEText(body, "plain"))
+                # 템플릿에 크리에이터 ID 적용
+                body = email_body_template.format(creator_id=creator_id)
+                msg.attach(MIMEText(body, "plain", 'utf-8'))  # 본문 인코딩
                 
                 # PDF 첨부
                 attachment = MIMEApplication(content, _subtype="pdf")
                 attachment.add_header('Content-Disposition', 'attachment', 
-                                   filename=f"{creator_id}_report.pdf")
+                                   filename=('utf-8', '', f"{creator_id}_report.pdf"))  # 파일명 인코딩
                 msg.attach(attachment)
                 
                 # 이메일 발송
@@ -552,37 +645,6 @@ def send_creator_emails(reports_data, creator_info_handler, email_user, email_pa
             except Exception as e:
                 status_placeholder.error(f"{creator_id}: 이메일 발송 실패 - {str(e)}")
                 failed_creators.append(creator_id)
-        
-        # 모든 크리에이터 이메일 발송 완료 후 관리자에게 알림 메일 발송
-        try:
-            admin_msg = MIMEMultipart()
-            admin_msg["From"] = email_user
-            admin_msg["To"] = email_user
-            admin_msg["Subject"] = f"크리에이터 이메일 발송 완료 ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
-            
-            if failed_creators:
-                admin_body = f"""안녕하세요,
-
-크리에이터 보고서 이메일 발송이 완료되었습니다.
-총 {len(pdf_files)}개 중 {len(pdf_files) - len(failed_creators)}개 발송 성공, {len(failed_creators)}개 발송 실패
-
-발송 실패한 크리에이터: {', '.join(failed_creators)}
-
-감사합니다."""
-            else:
-                admin_body = f"""안녕하세요,
-
-모든 크리에이터들에게 보고서 이메일 발송이 완료되었습니다.
-총 {len(pdf_files)}개의 보고서가 성공적으로 발송되었습니다.
-
-감사합니다."""
-            
-            admin_msg.attach(MIMEText(admin_body, "plain"))
-            server.send_message(admin_msg)
-            placeholder.success("관리자에게 발송 완료 알림 메일 전송 완료")
-            
-        except Exception as e:
-            placeholder.error(f"관리자 알림 메일 발송 실패: {str(e)}")
         
         server.quit()
         placeholder.success("SMTP 서버 연결 종료")
@@ -610,7 +672,7 @@ def main():
     
     # 파일 업로드 섹션
     st.header("1️⃣ 데이터 파일 업로드")
-
+    
     # 데이터 기간 설정
     st.subheader("📅 데이터 기간 설정")
     col1, col2 = st.columns(2)
@@ -618,18 +680,33 @@ def main():
         start_date = st.date_input("시작일", format="YYYY-MM-DD")
     with col2:
         end_date = st.date_input("종료일", format="YYYY-MM-DD")
-
-    creator_info = st.file_uploader("크리에이터 정보 파일 (creator_info.xlsx)", type=['xlsx'], key="creator_info")
-    statistics = st.file_uploader("통계 데이터 파일 (creator_statistics.xlsx)", type=['xlsx'], key="statistics")
+    
+    creator_info = st.file_uploader(
+        "크리에이터 정보 파일 (creator_info.xlsx)", 
+        type=['xlsx'], 
+        key="creator_info"
+    )
+    statistics = st.file_uploader(
+        "통계 데이터 파일 (Excel 또는 CSV)", 
+        type=['xlsx', 'csv'], 
+        help="Excel(.xlsx) 또는 CSV(.csv) 형식의 파일을 업로드해주세요.",
+        key="statistics"
+    )
     
     if not (creator_info and statistics):
         st.warning("필요한 파일을 모두 업로드해주세요.")
         st.stop()
-
+    
     # 데이터 검증 섹션
     st.header("2️⃣ 사전 데이터 검증")
     creator_info_handler = CreatorInfoHandler(creator_info)
-    statistics_df = pd.read_excel(statistics, header=0)
+    
+    # 파일 확장자에 따라 다르게 처리
+    file_extension = statistics.name.split('.')[-1].lower()
+    if file_extension == 'csv':
+        statistics_df = pd.read_csv(statistics, encoding='utf-8-sig')  # UTF-8 with BOM 인코딩 사용
+    else:
+        statistics_df = pd.read_excel(statistics, header=0)
     validator = DataValidator(statistics_df, creator_info_handler)
     
     # 데이터 검증 표시
@@ -751,6 +828,32 @@ def main():
             
             with email_tab:
                 if email_user and email_password:
+                    # 이메일 내용 입력 UI
+                    st.subheader("이메일 내용 설정")
+                    email_subject = st.text_input(
+                        "이메일 제목",
+                        value="{creator_id} 크리에이터님의 음원 사용현황 보고서",
+                        help="크리에이터 ID는 {creator_id}로 자동 치환됩니다."
+                    )
+                    
+                    email_body = st.text_area(
+                        "이메일 본문",
+                        value="""안녕하세요! {creator_id} 크리에이터님
+
+12월 초 예상 음원수익 전달드립니다 :)
+12/1 - 12/15 사이의 예상 수익금이며,
+해당 데이터는 유튜브 데이터 기반으로, 추정 수익이기 때문에 최종 정산값과는 차이가 있는 점 참고 바랍니다.
+해당 수익은 25년 2월 말 정산 예정입니다.
+
+궁금한점 있으시면 언제든지 연락주세요.
+감사합니다.
+
+루카스 드림""",
+                        help="크리에이터 ID는 {creator_id}로 자동 치환됩니다.",
+                        height=200
+                    )
+                    
+                    # 이메일 발송 버튼
                     if st.button("크리에이터 이메일 발송", key="send_emails_tab"):
                         email_status = st.empty()
                         with st.spinner('이메일 발송 중...'):
@@ -759,7 +862,9 @@ def main():
                                     st.session_state['reports_data'],
                                     st.session_state['creator_info_handler'],
                                     email_user,
-                                    email_password
+                                    email_password,
+                                    email_subject,  # 사용자가 입력한 제목
+                                    email_body      # 사용자가 입력한 본문
                                 )
                                 if failed_creators:
                                     st.error(f"발송 실패한 크리에이터: {', '.join(failed_creators)}")
