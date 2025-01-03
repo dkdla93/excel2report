@@ -602,8 +602,8 @@ def main():
         1. 데이터 기간 설정
         2. 크리에이터 정보 파일(`creator_info.xlsx`) 업로드
         3. 통계 데이터 파일(`creator_statistics.xlsx`) 업로드
-        4. 업로드된 데이터 검증 결과 확인
-        5. 필요시 이메일 발송 설정
+        4. 업로드된 데이터 사전 검증 결과 확인
+        5. 이메일 발송 설정
         6. 보고서 생성 버튼 클릭
         7. 처리 결과 검증 확인 후 보고서 다운로드
         """)
@@ -621,9 +621,48 @@ def main():
 
     creator_info = st.file_uploader("크리에이터 정보 파일 (creator_info.xlsx)", type=['xlsx'], key="creator_info")
     statistics = st.file_uploader("통계 데이터 파일 (creator_statistics.xlsx)", type=['xlsx'], key="statistics")
+    
+    if not (creator_info and statistics):
+        st.warning("필요한 파일을 모두 업로드해주세요.")
+        st.stop()
+
+    # 데이터 검증 섹션
+    st.header("2️⃣ 사전 데이터 검증")
+    creator_info_handler = CreatorInfoHandler(creator_info)
+    statistics_df = pd.read_excel(statistics, header=0)
+    validator = DataValidator(statistics_df, creator_info_handler)
+    
+    # 데이터 검증 표시
+    st.subheader("📊 전체 통계")
+    comparison_data = {
+        '항목': ['총 조회수', '총 수익'],
+        '합계 행': [
+            f"{validator.total_stats['total_views_summary']:,}",
+            f"₩{validator.total_stats['total_revenue_summary']:,.3f}"
+        ],
+        '실제 데이터': [
+            f"{validator.total_stats['total_views_data']:,}",
+            f"₩{validator.total_stats['total_revenue_data']:,.3f}"
+        ]
+    }
+    
+    views_match = abs(validator.total_stats['total_views_summary'] - validator.total_stats['total_views_data']) < 1
+    revenue_match = abs(validator.total_stats['total_revenue_summary'] - validator.total_stats['total_revenue_data']) < 1
+    comparison_data['일치 여부'] = ['✅' if views_match else '❌', '✅' if revenue_match else '❌']
+    
+    comparison_df = pd.DataFrame(comparison_data)
+    st.dataframe(
+        comparison_df.style.apply(
+            lambda x: ['background-color: #e6ffe6' if v == '✅' else 
+                    'background-color: #ffe6e6' if v == '❌' else '' 
+                    for v in x],
+            subset=['일치 여부']
+        ),
+        use_container_width=True
+    )
 
     # 이메일 발송 설정 섹션
-    st.header("2️⃣ 이메일 발송 설정")
+    st.header("3️⃣ 이메일 발송 설정")
     send_email = st.checkbox("보고서를 이메일로 발송하기", key="send_email_checkbox")
     email_user = None
     email_password = None
@@ -643,104 +682,67 @@ def main():
         with col2:
             email_password = st.text_input("Gmail 앱 비밀번호", type="password", key="email_password")
 
-
-    # 데이터 검증 섹션
-    if creator_info and statistics:
-        st.header("3️⃣ 데이터 검증")
-        creator_info_handler = CreatorInfoHandler(creator_info)
-        statistics_df = pd.read_excel(statistics, header=0)
-        validator = DataValidator(statistics_df, creator_info_handler)
-        
-        # 데이터 검증 표시
-        st.subheader("📊 전체 통계")
-        comparison_data = {
-            '항목': ['총 조회수', '총 수익'],
-            '합계 행': [
-                f"{validator.total_stats['total_views_summary']:,}",
-                f"₩{validator.total_stats['total_revenue_summary']:,.3f}"
-            ],
-            '실제 데이터': [
-                f"{validator.total_stats['total_views_data']:,}",
-                f"₩{validator.total_stats['total_revenue_data']:,.3f}"
-            ]
-        }
-        
-        views_match = abs(validator.total_stats['total_views_summary'] - validator.total_stats['total_views_data']) < 1
-        revenue_match = abs(validator.total_stats['total_revenue_summary'] - validator.total_stats['total_revenue_data']) < 1
-        comparison_data['일치 여부'] = ['✅' if views_match else '❌', '✅' if revenue_match else '❌']
-        
-        comparison_df = pd.DataFrame(comparison_data)
-        st.dataframe(
-            comparison_df.style.apply(
-                lambda x: ['background-color: #e6ffe6' if v == '✅' else 
-                        'background-color: #ffe6e6' if v == '❌' else '' 
-                        for v in x],
-                subset=['일치 여부']
-            ),
-            use_container_width=True
-        )
-       
-        # 보고서 생성 버튼
-        st.header("4️⃣ 보고서 생성")
-        if st.button("보고서 생성 시작", type="primary", key="generate_report") or ('reports_generated' in st.session_state and st.session_state['reports_generated']):
-            try:
-                tab1, tab2 = st.tabs(["처리 진행 상황", "검증 결과"])
-                
-                with tab1:
-                    progress_container = st.container()
-                    status_container = st.container()
-                    
-                    # 저장된 상태가 있으면 표시
-                    if 'progress_status' in st.session_state:
-                        status_container.write(st.session_state['progress_status'])
-                    if 'failed_status' in st.session_state:
-                        status_container.write(st.session_state['failed_status'])
-                    if 'admin_email_status' in st.session_state:
-                        status_container.write(st.session_state['admin_email_status'])
-                
-                with tab2:
-                    validation_container = st.container()
-                    if 'validation_results' in st.session_state and st.session_state['validation_results']:
-                        with validation_container:
-                            show_validation_results(
-                                st.session_state['statistics_df'],
-                                st.session_state['processed_df'],
-                                st.session_state['creator_info_handler']
-                            )
-                
-                # 처음 보고서 생성하는 경우에만 실행
-                if not ('reports_generated' in st.session_state and st.session_state['reports_generated']):
-                    with st.spinner('보고서 생성 중...'):
-                        reports_data, excel_files, processed_df = process_data(
-                            statistics_df,
-                            creator_info_handler,
-                            start_date,
-                            end_date,
-                            email_user=email_user,
-                            email_password=email_password,
-                            progress_container=progress_container,
-                            status_container=status_container,
-                            validation_container=validation_container
-                        )
-                        
-                        # 세션 상태에 데이터 저장
-                        if reports_data and excel_files:
-                            st.session_state['reports_data'] = reports_data
-                            st.session_state['creator_info_handler'] = creator_info_handler
-                            st.session_state['excel_files'] = excel_files
-                            st.session_state['processed_df'] = processed_df
-                            st.session_state['statistics_df'] = statistics_df
-                            st.session_state['reports_generated'] = True
-                            
-                            # 상태 메시지 저장
-                            st.session_state['progress_status'] = "처리 완료"
-                            st.session_state['failed_status'] = "실패: None"
-                            if 'admin_email_sent' in st.session_state:
-                                st.session_state['admin_email_status'] = "관리자 이메일로 보고서가 발송되었습니다."
+    # 보고서 생성 버튼
+    st.header("4️⃣ 보고서 생성")
+    if st.button("보고서 생성 시작", type="primary", key="generate_report") or ('reports_generated' in st.session_state and st.session_state['reports_generated']):
+        try:
+            tab1, tab2 = st.tabs(["처리 진행 상황", "검증 결과"])
             
-            except Exception as e:
-                st.error(f"처리 중 오류가 발생했습니다: {str(e)}")
-                st.write(traceback.format_exc())
+            with tab1:
+                progress_container = st.container()
+                status_container = st.container()
+                
+                # 저장된 상태가 있으면 표시
+                if 'progress_status' in st.session_state:
+                    status_container.write(st.session_state['progress_status'])
+                if 'failed_status' in st.session_state:
+                    status_container.write(st.session_state['failed_status'])
+                if 'admin_email_status' in st.session_state:
+                    status_container.write(st.session_state['admin_email_status'])
+            
+            with tab2:
+                validation_container = st.container()
+                if 'validation_results' in st.session_state and st.session_state['validation_results']:
+                    with validation_container:
+                        show_validation_results(
+                            st.session_state['statistics_df'],
+                            st.session_state['processed_df'],
+                            st.session_state['creator_info_handler']
+                        )
+            
+            # 처음 보고서 생성하는 경우에만 실행
+            if not ('reports_generated' in st.session_state and st.session_state['reports_generated']):
+                with st.spinner('보고서 생성 중...'):
+                    reports_data, excel_files, processed_df = process_data(
+                        statistics_df,
+                        creator_info_handler,
+                        start_date,
+                        end_date,
+                        email_user=email_user,
+                        email_password=email_password,
+                        progress_container=progress_container,
+                        status_container=status_container,
+                        validation_container=validation_container
+                    )
+                    
+                    # 세션 상태에 데이터 저장
+                    if reports_data and excel_files:
+                        st.session_state['reports_data'] = reports_data
+                        st.session_state['creator_info_handler'] = creator_info_handler
+                        st.session_state['excel_files'] = excel_files
+                        st.session_state['processed_df'] = processed_df
+                        st.session_state['statistics_df'] = statistics_df
+                        st.session_state['reports_generated'] = True
+                        
+                        # 상태 메시지 저장
+                        st.session_state['progress_status'] = "처리 완료"
+                        st.session_state['failed_status'] = "실패: None"
+                        if 'admin_email_sent' in st.session_state:
+                            st.session_state['admin_email_status'] = "관리자 이메일로 보고서가 발송되었습니다."
+            
+        except Exception as e:
+            st.error(f"처리 중 오류가 발생했습니다: {str(e)}")
+            st.write(traceback.format_exc())
         
         # 이메일 발송 섹션 (보고서 생성 후에만 표시)
         if 'reports_generated' in st.session_state and st.session_state['reports_generated']:
@@ -784,9 +786,6 @@ def main():
                         mime="application/zip",
                         key="download_reports_tab"
                     )
-
-    else:
-        st.warning("필요한 파일을 모두 업로드해주세요.")
 
 
 if __name__ == "__main__":
