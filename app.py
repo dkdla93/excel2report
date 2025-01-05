@@ -16,6 +16,8 @@ import requests
 import smtplib
 from email.header import Header
 from email.utils import formataddr
+import shutil
+
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -24,12 +26,39 @@ st.set_page_config(
     layout="wide"
 )
 
+def normalize_creator_id(creator_id):
+    """크리에이터 ID를 정규화합니다."""
+    if not creator_id or pd.isna(creator_id):
+        return ''
+    
+    # 문자열로 변환하고 공백 제거
+    creator_id = str(creator_id).strip()
+    
+    # 인코딩 정규화 (모든 한글을 NFC로 정규화)
+    try:
+        import unicodedata
+        creator_id = unicodedata.normalize('NFC', creator_id)
+    except Exception as e:
+        print(f"정규화 중 오류 발생: {str(e)}")
+    
+    # 특수 공백 문자 제거
+    creator_id = creator_id.replace('\u3000', ' ').replace('\xa0', ' ').strip()
+    return creator_id
+
+
 class DataValidator:
     def __init__(self, original_df, creator_info_handler):
         """데이터 검증을 위한 초기화"""
-        self.original_df = original_df
+        self.original_df = original_df.copy()  # 데이터프레임 복사
+        
         self.summary_row = original_df.iloc[0]  # 2행(인덱스 0)의 합계 데이터
+        
         self.data_rows = original_df.iloc[1:]   # 3행(인덱스 1)부터의 실제 데이터
+        
+        # 아이디 컬럼 정규화
+        self.data_rows.loc[:, '아이디'] = self.data_rows['아이디'].astype(str).str.strip()
+        self.original_df.loc[:, '아이디'] = self.original_df['아이디'].astype(str).str.strip()
+        
         self.creator_info_handler = creator_info_handler
         self.commission_rates = self._get_commission_rates()
         self.total_stats = self._calculate_total_stats()
@@ -40,9 +69,12 @@ class DataValidator:
         return {creator_id: self.creator_info_handler.get_commission_rate(creator_id) 
                 for creator_id in self.creator_info_handler.get_all_creator_ids()}
 
+
+
+
     def _calculate_total_stats(self):
         """전체 통계를 계산합니다."""
-        creator_revenues = self.data_rows.groupby('아이디').agg({
+        creator_revenues = self.original_df.groupby('아이디').agg({
             '대략적인 파트너 수익 (KRW)': 'sum'
         })
         total_revenue_after = sum(
@@ -51,32 +83,47 @@ class DataValidator:
         )
         
         summary_stats = {
-            'creator_count': len(self.data_rows['아이디'].unique()),
+            'creator_count': len(self.original_df['아이디'].unique()),
             'total_views_summary': self.summary_row['조회수'],
             'total_revenue_summary': self.summary_row['대략적인 파트너 수익 (KRW)'],
-            'total_views_data': self.data_rows['조회수'].sum(),
-            'total_revenue_data': self.data_rows['대략적인 파트너 수익 (KRW)'].sum(),
+            'total_views_data': self.original_df['조회수'].sum(),
+            'total_views_data2': self.data_rows['조회수'].sum(),
+            'total_revenue_data': self.original_df['대략적인 파트너 수익 (KRW)'].sum(),
+            'total_revenue_data2': self.data_rows['대략적인 파트너 수익 (KRW)'].sum(),
             'total_revenue_after': total_revenue_after
         }
         return summary_stats
 
+
     def _calculate_creator_stats(self):
         """크리에이터별 통계를 계산합니다."""
-        grouped = self.data_rows.groupby('아이디').agg({
+        grouped = self.original_df.groupby('아이디', as_index=False).agg({
             '조회수': 'sum',
             '대략적인 파트너 수익 (KRW)': 'sum'
-        }).reset_index()
+        })
         return grouped
 
     def compare_creator_stats(self, processed_df):
         """크리에이터별 통계를 비교합니다."""
-        processed_creator_stats = self._calculate_creator_stats()
+        processed_df = processed_df.copy()  # 데이터프레임 복사
+        processed_df.loc[:, '아이디'] = processed_df['아이디'].astype(str).str.strip()
+        
+        processed_creator_stats = processed_df.groupby('아이디', as_index=False).agg({
+            '조회수': 'sum',
+            '대략적인 파트너 수익 (KRW)': 'sum'
+        })
+
         merged_stats = pd.merge(
             self.creator_stats,
             processed_creator_stats,
             on='아이디',
-            suffixes=('_original', '_processed')
+            suffixes=('_original', '_processed'),
+            how='outer'
         )
+        
+        # NaN 값을 0으로 채우기
+        merged_stats = merged_stats.fillna(0)
+        
         merged_stats['views_match'] = abs(merged_stats['조회수_original'] - merged_stats['조회수_processed']) < 1
         merged_stats['revenue_match'] = abs(
             merged_stats['대략적인 파트너 수익 (KRW)_original'] -
@@ -84,23 +131,89 @@ class DataValidator:
         ) < 1
         return merged_stats
 
+
+
+
 class CreatorInfoHandler:
     def __init__(self, info_file):
         """크리에이터 정보 파일을 읽어서 초기화합니다."""
-        self.creator_info = pd.read_excel(info_file)
-        self.creator_info.set_index('아이디', inplace=True)
-    
+        try:
+            # 파일 읽기 시도 (UTF-8)
+            if info_file.name.endswith('.csv'):
+                self.creator_info = pd.read_csv(info_file, encoding='utf-8-sig')
+            else:
+                self.creator_info = pd.read_excel(info_file)
+        except UnicodeDecodeError:
+            # UTF-8 실패시 CP949로 시도
+            info_file.seek(0)
+            self.creator_info = pd.read_csv(info_file, encoding='cp949')
+        
+        # 필수 컬럼 확인
+        required_columns = ['아이디', 'channel', 'percent', 'email']
+        if not all(col in self.creator_info.columns for col in required_columns):
+            raise ValueError("크리에이터 정보 파일에 필수 컬럼이 누락되었습니다.")
+        
+        # 데이터 정규화
+        self.creator_info = self.creator_info[required_columns].copy()
+        self.creator_info['아이디'] = self.creator_info['아이디'].fillna('')
+        self.creator_info['아이디'] = self.creator_info['아이디'].apply(normalize_creator_id)
+        
+        # percent 컬럼 처리
+        self.creator_info['percent'] = pd.to_numeric(self.creator_info['percent'], errors='coerce')
+        self.creator_info['percent'] = self.creator_info['percent'].fillna(1.0)
+        
+        # 크리에이터 정보를 딕셔너리로 변환
+        self.commission_rates = {}
+        for _, row in self.creator_info.iterrows():
+            creator_id = normalize_creator_id(row['아이디'])
+            if creator_id:  # 빈 문자열이 아닌 경우만 저장
+                self.commission_rates[creator_id] = float(row['percent'])
+                print(f"수수료율 저장: {creator_id} ({creator_id.encode('utf-8')}) -> {float(row['percent'])}")
+        
+        # 디버깅용 출력
+        print("\n크리에이터 수수료율 정보 (바이트 표현):")
+        for creator_id, rate in self.commission_rates.items():
+            print(f"- {creator_id} ({creator_id.encode('utf-8')}): {rate}")
+
     def get_commission_rate(self, creator_id):
         """크리에이터의 수수료율을 반환합니다."""
-        return self.creator_info.loc[creator_id, 'percent']
+        try:
+            if not creator_id or pd.isna(creator_id):
+                return 1.0
+            
+            creator_id = normalize_creator_id(creator_id)
+            
+            # 디셔너리에서 수수료율 조회
+            rate = self.commission_rates.get(creator_id)
+            if rate is not None:
+                return rate
+            
+            # 경고 메시지 제거 (이미 process_data에서 처리됨)
+            return 1.0
+            
+        except Exception as e:
+            print(f"수수료율 조회 중 오류 발생 ({creator_id}): {str(e)}")
+            traceback.print_exc()
+            return 1.0
     
     def get_email(self, creator_id):
         """크리에이터의 이메일 주소를 반환합니다."""
-        return self.creator_info.loc[creator_id, 'email']
+        try:
+            creator_id = str(creator_id).strip()
+            matching_rows = self.creator_info[self.creator_info['아이디'] == creator_id]
+            if matching_rows.empty:
+                st.warning(f"크리에이터 '{creator_id}'의 이메일 정보가 없습니다.")
+                return None
+            return matching_rows['email'].iloc[0]
+        except Exception as e:
+            st.warning(f"이메일 조회 중 오류 발생 ({creator_id}): {str(e)}")
+            return None
     
     def get_all_creator_ids(self):
         """모든 크리에이터 ID를 반환합니다."""
-        return list(self.creator_info.index)
+        if self.creator_info is None or self.creator_info.empty:
+            return []
+        return [id for id in self.creator_info['아이디'].unique() if id and not pd.isna(id)]
 
 def clean_numeric_value(value):
     """숫자 값을 안전하게 정수로 변환합니다."""
@@ -433,31 +546,67 @@ def create_zip_file(reports_data, excel_files, original_df=None, processed_df=No
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
+
+
+
 def process_data(input_df, creator_info_handler, start_date, end_date, 
                 email_user=None, email_password=None,
                 progress_container=None, status_container=None, validation_container=None):
     """데이터를 처리하고 보고서를 생성합니다."""
-    reports_data = {}
-    excel_files = {}
-    processed_full_data = pd.DataFrame()
-    failed_creators = []
-    
     try:
-        # 진행 상태 표시 초기화
-        total_creators = len(creator_info_handler.get_all_creator_ids())
+        # 입력 데이터프레임 복사 및 전처리
+        input_df = input_df.copy()
+        
+        # NaN 값 처리 및 아이디 정규화
+        input_df['아이디'] = input_df['아이디'].fillna('')
+        input_df['아이디'] = input_df['아이디'].astype(str).str.strip()
+        
+        # 빈 아이디 또는 'nan' 제거
+        input_df = input_df[input_df['아이디'].apply(lambda x: x != '' and x.lower() != 'nan')]
+        
+        # 크리에이터 목록 추출
+        input_df['아이디'] = input_df['아이디'].apply(normalize_creator_id)
+        unique_creators = sorted(input_df[input_df['아이디'] != '']['아이디'].unique())
+        
+        # 수수료율 정보 정규화하여 저장
+        commission_rates = {}
+        for creator_id in unique_creators:
+            normalized_id = normalize_creator_id(creator_id)
+            print(f"\n크리에이터 ID 매칭 시도: {normalized_id} ({normalized_id.encode('utf-8')})")
+            print("저장된 수수료율 키:", [f"{k} ({k.encode('utf-8')})" for k in creator_info_handler.commission_rates.keys()])
+            
+            if normalized_id in creator_info_handler.commission_rates:
+                rate = creator_info_handler.commission_rates[normalized_id]
+                commission_rates[normalized_id] = rate
+                print(f"수수료율 매칭 성공: {normalized_id} -> {rate}")
+            else:
+                print(f"수수료율 매칭 실패: {normalized_id}")
+                commission_rates[normalized_id] = 1.0  # 기본값 설정
+        
+        print("\n수수료율 정보 확인:")
+        for creator_id in unique_creators:
+            rate = commission_rates[creator_id]  # 이미 저장된 값 사용
+            print(f"- {creator_id}: {rate}")
+        
+        total_creators = len(unique_creators)
+        if total_creators == 0:
+            st.error("처리할 크리에이터 데이터가 없습니다.")
+            return None, None, None
+        
+        reports_data = {}
+        excel_files = {}
+        processed_full_data = pd.DataFrame()
+        failed_creators = []
+        
         if progress_container:
             progress_bar = progress_container.progress(0)
-            progress_status = progress_container.empty()
             progress_text = progress_container.empty()
+            progress_status = progress_container.empty()
             failed_status = progress_container.empty()
-            download_button = progress_container.empty()
-            progress_status.write("처리 전")
         
-        # 크리에이터별 처리
-        for idx, creator_id in enumerate(creator_info_handler.get_all_creator_ids()):
+        for idx, creator_id in enumerate(unique_creators):
             try:
                 if progress_container:
-                    progress_status.write("처리 중")
                     progress = (idx + 1) / total_creators
                     progress_bar.progress(progress)
                     progress_text.write(f"진행 상황: {idx + 1}/{total_creators} - {creator_id} 처리 중...")
@@ -465,29 +614,34 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 # 데이터 필터링 및 처리
                 creator_data = input_df[input_df['아이디'] == creator_id].copy()
                 if creator_data.empty:
-                    failed_creators.append(creator_id)
+                    failed_creators.append(f"{creator_id} (데이터 없음)")
                     continue
                 
-                # 데이터 처리
-                creator_data['조회수'] = creator_data['조회수'].fillna(0)
-                creator_data['대략적인 파트너 수익 (KRW)'] = creator_data['대략적인 파트너 수익 (KRW)'].fillna(0)
-                commission_rate = creator_info_handler.get_commission_rate(creator_id)
+                # 수치 데이터 처리
+                creator_data['조회수'] = pd.to_numeric(creator_data['조회수'], errors='coerce').fillna(0)
+                creator_data['대략적인 파트너 수익 (KRW)'] = pd.to_numeric(creator_data['대략적인 파트너 수익 (KRW)'], errors='coerce').fillna(0)
                 
-                total_views = clean_numeric_value(creator_data['조회수'].sum())
-                total_revenue_before = clean_numeric_value(creator_data['대략적인 파트너 수익 (KRW)'].sum())
-                total_revenue_after = int(total_revenue_before * commission_rate)
+                # 수수료율 적용 (get_commission_rate 호출하지 않고 직접 사용)
+                commission_rate = commission_rates[creator_id]
+                print(f"수수료율 적용: {creator_id} -> {commission_rate}")
+                
+                creator_data['수수료 적용 수익'] = creator_data['대략적인 파트너 수익 (KRW)'] * commission_rate
+                
+                # 통계 계산
+                total_views = int(creator_data['조회수'].sum())
+                total_revenue = int(creator_data['대략적인 파트너 수익 (KRW)'].sum())
+                total_revenue_after = int(total_revenue * commission_rate)
                 
                 processed_full_data = pd.concat([processed_full_data, creator_data])
                 
                 # 상위 50개 데이터 필터링
                 filtered_data = creator_data.nlargest(50, '조회수').copy()
-                filtered_data['수수료 제외 후 수익'] = filtered_data['대략적인 파트너 수익 (KRW)'] * commission_rate
                 
                 # 총계 행 추가
                 total_row = pd.Series({
-                    '동영상 제목': '총계',
+                    '콘텐츠': '총계',
                     '조회수': total_views,
-                    '대략적인 파트너 수익 (KRW)': total_revenue_before,
+                    '대략적인 파트너 수익 (KRW)': total_revenue,
                     '수수료 제외 후 수익': total_revenue_after
                 }, name='total')
                 filtered_data = pd.concat([filtered_data, pd.DataFrame([total_row])], ignore_index=True)
@@ -503,8 +657,9 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                     'creatorName': creator_id,
                     'period': f"{start_date.strftime('%y.%m.%d')} - {end_date.strftime('%y.%m.%d')}",
                     'totalViews': total_views,
-                    'totalRevenue': total_revenue_after,  # 수수료 제외 후 수익만 사용
-                    'videoData': create_video_data(filtered_data[:-1])
+                    'totalRevenue': total_revenue_after,  # 수수료 제용된 총 수익
+                    'commission_rate': commission_rate,  # 수수료율 추가
+                    'videoData': create_video_data(filtered_data)  # 필터링된 데이터 전달
                 }
                 
                 # HTML 보고서 생성
@@ -516,74 +671,73 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 pdf_content = create_pdf_from_html(html_content, creator_id)
                 if pdf_content:
                     reports_data[f"{creator_id}_report.pdf"] = pdf_content
-
+                
             except Exception as e:
-                failed_creators.append(creator_id)
+                failed_creators.append(f"{creator_id} (오류: {str(e)})")
                 if status_container:
-                    status_container.error(f"{creator_id} 크리에이터 처리 중 오류 발생: {str(e)}")
+                    status_container.error(f"{creator_id} 처리 중 오류: {str(e)}")
                 continue
         
-        # 모든 처리 완료 후 상태 업데이트
-        if reports_data and excel_files:
-            progress_status.write("처리 완료")
+        if failed_creators:
+            st.warning(f"처리 실패한 크리에이터들: {', '.join(failed_creators)}")
+        
+        if not reports_data and not excel_files:
+            st.error("생성된 보고서가 없습니다.")
+            return None, None, None
+            
+        # 처리 완료 후 상태 업데이트
+        if progress_container:
             progress_text.write(f"진행 상황: {total_creators}/{total_creators} - 처리 완료")
+            progress_status.write("처리 완료")
             failed_status.write(f"실패: {', '.join(failed_creators) if failed_creators else 'None'}")
             
-            # 세션 상태에 상태 메시지 저장
-            st.session_state['progress_status'] = "처리 완료"
-            st.session_state['failed_status'] = f"실패: {', '.join(failed_creators) if failed_creators else 'None'}"
+            # 먼저 세션 상태에 데이터 저장
+            st.session_state['statistics_df'] = input_df
+            st.session_state['processed_df'] = processed_full_data
             
-            # 검증 결과 표시
+            # 그 다음 검증 결과 표시
             if not processed_full_data.empty and validation_container:
                 with validation_container:
-                    show_validation_results(input_df, processed_full_data, creator_info_handler)
-                    st.session_state['validation_results'] = True  # 검증 결과가 생성되었음을 표시
+                    show_validation_results(
+                        input_df,                # 직접 데이터 사용
+                        processed_full_data,     # 직접 데이터 사용
+                        creator_info_handler     # 현재 핸들러 사용
+                    )
+                    st.session_state['validation_results'] = True
             
             # 관리자에게 자동으로 이메일 발송
             if email_user and email_password:
                 try:
-                    # SMTP 서버 연결
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
                     server.login(email_user, email_password)
                     
-                    # 전체 보고서 ZIP 파일 생성
                     zip_data = create_zip_file(reports_data, excel_files, input_df, processed_full_data, creator_info_handler)
                     
-                    # 관리자용 이메일 메시지 생성
                     admin_msg = MIMEMultipart()
                     admin_msg["From"] = email_user
                     admin_msg["To"] = email_user
                     admin_msg["Subject"] = f"크리에이터 보고서 생성 결과 ({datetime.now().strftime('%Y-%m-%d %H:%M')})"
                     
-                    admin_body = """안녕하세요,
-
-생성된 보고서를 확인용으로 발송드립니다.
-크리에이터들에게는 이메일 발송 버튼을 통해 개별적으로 발송하실 수 있습니다.
-
-감사합니다."""
+                    admin_body = """안녕하세요,\n\n생성된 보고서를 확인용으로 발송드립니다.\n크리에이터들에게는 이메일 발송 버튼을 통해 개별적으로 발송하실 수 있습니다.\n\n감사합니다."""
                     
                     admin_msg.attach(MIMEText(admin_body, "plain"))
-                    
-                    # ZIP 파일 첨부
                     attachment = MIMEApplication(zip_data, _subtype="zip")
                     attachment.add_header('Content-Disposition', 'attachment', filename='reports.zip')
                     admin_msg.attach(attachment)
                     
-                    # 관리자 이메일 발송
                     server.send_message(admin_msg)
                     server.quit()
                     
                     if status_container:
                         status_container.success("관리자 이메일로 보고서가 발송되었습니다.")
-                        st.session_state['admin_email_status'] = "관리자 이메일로 보고서가 발송되었습니다."
                         st.session_state['admin_email_sent'] = True
                     
                 except Exception as e:
                     if status_container:
                         status_container.error(f"관리자 이메일 발송 실패: {str(e)}")
-
-            return reports_data, excel_files, processed_full_data
+            
+        return reports_data, excel_files, processed_full_data
         
     except Exception as e:
         st.error(f"전체 처리 중 오류 발생: {str(e)}")
@@ -655,20 +809,193 @@ def send_creator_emails(reports_data, creator_info_handler, email_user, email_pa
     
     return failed_creators
 
+
+
+def extract_creator_name(zip_filename):
+    """압축파일명에서 크리에이터명 추출"""
+    try:
+        # 파일명 형식: '콘텐츠 2024-12-01_2025-01-01 돼끼'
+        parts = zip_filename.split(' ')
+        if len(parts) >= 3:
+            # 마지막 부분이 크리에이터명
+            creator_name = parts[-1]
+            return creator_name
+        return None
+    except Exception as e:
+        st.error(f"크리에이터명 추출 중 오류: {str(e)}")
+        return None
+
+def process_zip_files(uploaded_files):
+    """여러 ZIP 파일을 처리하여 하나의 통합된 DataFrame으로 반환"""
+    temp_dir = "temp_extract"
+    all_data_rows = []  # 실제 데이터 행
+    sum_rows = []       # 각 파일의 합계 행
+    
+    # 원하는 칼럼 순서 정의
+    column_order = [
+        '아이디',
+        '콘텐츠',
+        '동영상 제목',
+        '동영상 게시 시간',
+        '길이',
+        '조회수',
+        '시청 시간(단위: 시간)',
+        '구독자',
+        '대략적인 파트너 수익 (KRW)',
+        '평균 시청 지속 시간'
+    ]
+    
+    try:
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        for uploaded_file in uploaded_files:
+            try:
+                # 임시 파일로 ZIP 저장
+                zip_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(zip_path, 'wb') as f:
+                    f.write(uploaded_file.getvalue())
+                
+                # 크리에이터명 추출
+                creator_name = extract_creator_name(uploaded_file.name.replace('.zip', ''))
+                if not creator_name:
+                    st.warning(f"'{uploaded_file.name}' 파일에서 크리에이터명을 추출할 수 없습니다.")
+                    continue
+                
+                # 압축 해제
+                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+                
+                # '표 데이터.csv' 파일 찾기
+                csv_file = None
+                for root, dirs, files in os.walk(temp_dir):
+                    if '표 데이터.csv' in files:
+                        csv_file = os.path.join(root, '표 데이터.csv')
+                        break
+                
+                if not csv_file:
+                    st.warning(f"'{uploaded_file.name}'에서 '표 데이터.csv' 파일을 찾을 수 없습니다.")
+                    continue
+                
+                # CSV 파일 읽기
+                df = pd.read_csv(csv_file, encoding='utf-8')
+                
+                # '상위 500개 결과 표시' 행 제거
+                df = df[df['콘텐츠'] != '상위 500개 결과 표시']
+                
+                # 합계 행과 데이터 행 분리
+                sum_row = df.iloc[0].copy()
+                data_rows = df.iloc[1:].copy()
+                
+                # '아이디' 칼럼 추가 및 크리에이터명 입력
+                if '아이디' not in data_rows.columns:
+                    data_rows.insert(0, '아이디', '')  # 첫 번째 위치에 추가
+                data_rows['아이디'] = creator_name
+                
+                # 합계 행에도 '아이디' 칼럼 추가
+                if '아이디' not in sum_row.index:
+                    sum_row = pd.concat([pd.Series({'아이디': ''}), sum_row])
+                
+                # 합계 행과 데이터 행 저장
+                sum_rows.append(sum_row)
+                all_data_rows.append(data_rows)
+                
+                st.success(f"'{uploaded_file.name}' 처리 완료")
+            
+            except Exception as e:
+                st.error(f"ZIP 파일 처리 중 오류 발생 ({uploaded_file.name}): {str(e)}")
+        
+        if not all_data_rows:
+            return None
+        
+        # 모든 데이터 행 병합
+        final_data = pd.concat(all_data_rows, axis=0, ignore_index=True)
+        
+        # 숫자형 칼럼 정의
+        numeric_cols = ['조회수', '구독자', '길이', '시청 시간(단위: 시간)', '대략적인 파트너 수익 (KRW)']
+        
+        # 첫 번째 합계 행을 템플릿으로 사용
+        final_sum_row = sum_rows[0].copy()
+        final_sum_row['콘텐츠'] = '합계'
+        final_sum_row['아이디'] = ''
+        
+        # 모든 합계 행의 숫자형 데이터 합산
+        for col in numeric_cols:
+            if col in final_sum_row.index:
+                final_sum_row[col] = sum(row[col] for row in sum_rows)
+        
+        # 합계 행을 DataFrame으로 변환
+        sum_row_df = pd.DataFrame([final_sum_row])
+        
+        # 최종 데이터프레임 생성
+        final_df = pd.concat([sum_row_df, final_data], ignore_index=True)
+        
+        # 칼럼 순서 재정렬
+        existing_columns = [col for col in column_order if col in final_df.columns]
+        final_df = final_df[existing_columns]
+        
+        return final_df
+    
+    except Exception as e:
+        st.error(f"전체 처리 중 오류 발생: {str(e)}")
+        return None
+    
+    finally:
+        # 임시 디렉토리 정리
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+
+
+
+
+
 def main():
     st.title("크리에이터 정산 보고서 생성기")
     
     with st.expander("📝 사용 방법", expanded=False):
         st.markdown("""
         ### 사용 방법
-        1. 데이터 기간 설정
-        2. 크리에이터 정보 파일(`creator_info.xlsx`) 업로드
-        3. 통계 데이터 파일(`creator_statistics.xlsx`) 업로드
-        4. 업로드된 데이터 사전 검증 결과 확인
+        1. ZIP 파일 변환 (선택사항)
+           - 여러 개의 ZIP 파일을 하나의 CSV 파일로 변환
+        2. 데이터 기간 설정
+        3. 크리에이터 정보 파일 업로드
+        4. 통계 데이터 파일 업로드
         5. 이메일 발송 설정
-        6. 보고서 생성 버튼 클릭
-        7. 처리 결과 검증 확인 후 보고서 다운로드
+        6. 보고서 생성
         """)
+    
+    # ZIP 파일 변환 섹션
+    st.header("0️⃣ ZIP 파일 변환 (선택사항)")
+    with st.expander("ZIP 파일을 CSV로 변환", expanded=False):
+        zip_files = st.file_uploader(
+            "ZIP 파일 업로드 (여러 개 가능)",
+            type=['zip'],
+            accept_multiple_files=True,
+            key="zip_files",
+            help="여러 개의 ZIP 파일을 하나의 CSV 파일로 변환합니다."
+        )
+
+        if zip_files:
+            if st.button("ZIP 파일 변환", key="convert_zip"):
+                with st.spinner('ZIP 파일 처리 중...'):
+                    try:
+                        converted_df = process_zip_files(zip_files)
+                        if converted_df is not None:
+                            # CSV 파일로 변환
+                            csv_data = converted_df.to_csv(index=False, encoding='utf-8-sig')
+                            
+                            # 다운로드 버튼 생성
+                            st.success("ZIP 파일 변환이 완료되었습니다!")
+                            st.download_button(
+                                label="변환된 CSV 파일 다운로드",
+                                data=csv_data,
+                                file_name="통합_통계_데이터.csv",
+                                mime="text/csv",
+                                key="download_converted_csv"
+                            )
+                        else:
+                            st.error("ZIP 파일 처리 중 오류가 발생했습니다.")
+                    except Exception as e:
+                        st.error(f"변환 중 오류가 발생했습니다: {str(e)}")
     
     # 파일 업로드 섹션
     st.header("1️⃣ 데이터 파일 업로드")
@@ -709,6 +1036,8 @@ def main():
         statistics_df = pd.read_excel(statistics, header=0)
     validator = DataValidator(statistics_df, creator_info_handler)
     
+
+
     # 데이터 검증 표시
     st.subheader("📊 전체 통계")
     comparison_data = {
@@ -718,14 +1047,16 @@ def main():
             f"₩{validator.total_stats['total_revenue_summary']:,.3f}"
         ],
         '실제 데이터': [
-            f"{validator.total_stats['total_views_data']:,}",
-            f"₩{validator.total_stats['total_revenue_data']:,.3f}"
+            f"{validator.total_stats['total_views_data2']:,}",
+            f"₩{validator.total_stats['total_revenue_data2']:,.3f}"
         ]
     }
-    
+
     views_match = abs(validator.total_stats['total_views_summary'] - validator.total_stats['total_views_data']) < 1
     revenue_match = abs(validator.total_stats['total_revenue_summary'] - validator.total_stats['total_revenue_data']) < 1
     comparison_data['일치 여부'] = ['✅' if views_match else '❌', '✅' if revenue_match else '❌']
+
+
     
     comparison_df = pd.DataFrame(comparison_data)
     st.dataframe(
@@ -782,16 +1113,16 @@ def main():
                 if 'validation_results' in st.session_state and st.session_state['validation_results']:
                     with validation_container:
                         show_validation_results(
-                            st.session_state['statistics_df'],
-                            st.session_state['processed_df'],
-                            st.session_state['creator_info_handler']
+                            st.session_state['statistics_df'],     # 세션에서 데이터 가져오기
+                            st.session_state['processed_df'],      # 세션에서 데이터 가져오기
+                            creator_info_handler                   # 현재 핸들러 사용
                         )
             
             # 처음 보고서 생성하는 경우에만 실행
             if not ('reports_generated' in st.session_state and st.session_state['reports_generated']):
                 with st.spinner('보고서 생성 중...'):
                     reports_data, excel_files, processed_df = process_data(
-                        statistics_df,
+                        statistics_df,          # 여기서는 statistics_df를 input_df로 전달
                         creator_info_handler,
                         start_date,
                         end_date,
@@ -808,7 +1139,7 @@ def main():
                         st.session_state['creator_info_handler'] = creator_info_handler
                         st.session_state['excel_files'] = excel_files
                         st.session_state['processed_df'] = processed_df
-                        st.session_state['statistics_df'] = statistics_df
+                        
                         st.session_state['reports_generated'] = True
                         
                         # 상태 메시지 저장
@@ -874,15 +1205,17 @@ def main():
                                 st.error(f"이메일 발송 중 오류 발생: {str(e)}")
                 else:
                     st.error("이메일 발송을 위해 Gmail 계정 정보가 필요합니다.")
-            
+
+
+
             with download_tab:
-                if all(k in st.session_state for k in ['reports_data', 'excel_files', 'statistics_df', 'processed_df', 'creator_info_handler']):
+                if all(k in st.session_state for k in ['reports_data', 'excel_files']):
                     zip_data = create_zip_file(
                         st.session_state['reports_data'],
                         st.session_state['excel_files'],
-                        st.session_state['statistics_df'],
+                        statistics_df,  # input_df 대신 statistics_df 사용
                         st.session_state['processed_df'],
-                        st.session_state['creator_info_handler']
+                        creator_info_handler
                     )
                     st.download_button(
                         label="보고서 다운로드",
@@ -891,7 +1224,7 @@ def main():
                         mime="application/zip",
                         key="download_reports_tab"
                     )
-
+                
 
 if __name__ == "__main__":
     main()
