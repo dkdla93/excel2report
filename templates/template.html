@@ -5,17 +5,17 @@
     <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com;">
     <style>
-        /* 웹 폰트 추가 */
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR&family=Noto+Sans+JP&family=Noto+Sans+SC&display=swap');
-        
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap');
+    
         @font-face {
             font-family: 'NanumGothic';
             src: local('NanumGothic');
         }
 
         body {
-            font-family: 'NanumGothic', 'Noto Sans CJK KR', sans-serif;
+            font-family: 'NanumGothic', 'Noto Sans CJK KR', Noto Sans', 'Noto Sans KR', 'Noto Sans JP', 'Noto Sans SC', sans-serif;
             margin: 0;
             padding: 20px;
             background: #f8f9fa;
