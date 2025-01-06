@@ -321,36 +321,17 @@ def show_validation_results(original_df, processed_df, creator_info_handler):
 
 def create_video_data(df):
     """데이터프레임에서 비디오 데이터를 추출합니다."""
-    import base64
-    
     video_data = []
     for _, row in df.iterrows():
-        try:
-            if pd.isna(row['동영상 제목']):
-                continue
+        if pd.isna(row['동영상 제목']):  # 제목이 없는 행은 건너뛰기
+            continue
             
-            # base64로 인코딩했다가 다시 디코딩
-            title = str(row['동영상 제목'])
-            title_bytes = title.encode('utf-8')
-            title_base64 = base64.b64encode(title_bytes)
-            title = base64.b64decode(title_base64).decode('utf-8')
-            
-            video_data.append({
-                'title': title,
-                'views': clean_numeric_value(row['조회수']),
-                'revenue': clean_numeric_value(row['수수료 후 수익'])
-            })
-            
-        except Exception as e:
-            print(f"Error processing title: {str(e)}")
-            video_data.append({
-                'title': '[인코딩 오류]',
-                'views': clean_numeric_value(row['조회수']),
-                'revenue': clean_numeric_value(row['수수료 후 수익'])
-            })
-            
+        video_data.append({
+            'title': str(row['동영상 제목']),
+            'views': clean_numeric_value(row['조회수']),
+            'revenue': clean_numeric_value(row['수수료 후 수익'])  # 수수료 제외 후 수익만 사용
+        })
     return video_data
-
 
 def generate_html_report(data):
     """HTML 보고서를 생성합니다."""
@@ -359,66 +340,49 @@ def generate_html_report(data):
         with open(template_path, 'r', encoding='utf-8') as f:
             template_str = f.read()
         
-        # 데이터 검증
-        for video in data['videoData']:
-            video['title'] = validate_text(video['title'])
-            # 디버깅용 출력
-            print(f"Processing title: {video['title']}")
-            print(f"Title bytes: {video['title'].encode('utf-8')}")
-        
         template = Template(template_str)
         template.globals['format_number'] = lambda x, decimals=0: "{:,.{}f}".format(float(x), decimals)
+
         
-        # 디버깅용 출력
-        html_content = template.render(**data)
-        print("Generated HTML sample:", html_content[:1000])
-        
-        return html_content
+        return template.render(**data)
         
     except Exception as e:
         st.error(f"HTML 생성 실패 ({data['creatorName']}): {str(e)}")
         st.write(traceback.format_exc())
         return None
 
-
-
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
-        print(f"[DEBUG] PDF 생성 시작 - 크리에이터: {creator_id}")
-        
-        # 폰트 설정
-        from weasyprint import HTML, CSS
-        from weasyprint.text.fonts import FontConfiguration
-        font_config = FontConfiguration()
-        
-        # HTML 직접 생성 (외부 리소스 요청 없이)
-        html_doc = HTML(
-            string=html_content,
-            encoding='utf-8',
-            base_url=None  # base_url 명시적으로 None으로 설정
-        )
-
-        # CSS 설정
-        css = CSS(string='''
+        portrait_css = CSS(string="""
+            @font-face {
+                font-family: 'NanumGothic';
+                src: local('NanumGothic');
+            }
+            @font-face {
+                font-family: 'Noto Sans';
+                src: local('Noto Sans');
+            }
+            @font-face {
+                font-family: 'Noto Sans CJK JP';
+                src: local('Noto Sans CJK JP');
+            }
+            @font-face {
+                font-family: 'Noto Sans CJK SC';
+                src: local('Noto Sans CJK SC');
+            }
             @page {
                 size: A4 portrait;
                 margin: 8mm;
             }
-
             body {
-                font-family: system-ui, -apple-system, sans-serif;
+                font-family: 'NanumGothic', 'Noto Sans', 'Noto Sans CJK JP', 'Noto Sans CJK SC', sans-serif;
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
             }
-            
-            /* RTL(Right-to-Left) 텍스트 지원 */
-            [dir="rtl"] { 
-                text-align: right; 
-                font-family: 'Noto Sans Arabic', sans-serif;
-            }
-            
             .report-container {
                 max-width: 100%;
                 padding: 8px;
@@ -471,6 +435,14 @@ def create_pdf_from_html(html_content, creator_id):
                 padding: 1px 3px;
                 line-height: 1;
             }
+            .earnings-table th:first-child,
+            .earnings-table td:first-child {
+                padding-left: 0;
+            }
+            .earnings-table th:last-child,
+            .earnings-table td:last-child {
+                padding-right: 0;
+            }
             .earnings-table tr {
                 height: auto !important;
                 border-bottom: 0.5px solid #e9ecef;
@@ -484,29 +456,25 @@ def create_pdf_from_html(html_content, creator_id):
                 margin: 0 !important;
                 vertical-align: middle;
             }
-        ''')
+        """)
         
-        # PDF 생성
+        # WeasyPrint 설정에 폰트 설정 추가
+        from weasyprint.text.fonts import FontConfiguration
+        font_config = FontConfiguration()
+        
         pdf_buffer = BytesIO()
-        html_doc.write_pdf(
-            target=pdf_buffer,
-            stylesheets=[css],
-            font_config=font_config
+        HTML(string=html_content).write_pdf(
+            pdf_buffer,
+            stylesheets=[portrait_css],
+            font_config=font_config,
+            presentational_hints=True
         )
         pdf_buffer.seek(0)
-
-        # PDF 생성 결과 확인
-        pdf_content = pdf_buffer.getvalue()
-        print(f"[DEBUG] PDF 생성 완료 - 크기: {len(pdf_content)} bytes")
-        
-        return pdf_content
+        return pdf_buffer.getvalue()
         
     except Exception as e:
-        print(f"[ERROR] PDF 생성 중 오류 발생: {str(e)}")
-        traceback.print_exc()
+        print(f"PDF 생성 중 오류 발생: {str(e)}")  # 디버깅을 위한 오류 출력 추가
         return None
-
-
 
 def create_validation_excel(original_df, processed_df, creator_info_handler):
     """검증 결과를 담은 엑셀 파일을 생성합니다."""
@@ -579,34 +547,16 @@ def create_zip_file(reports_data, excel_files, original_df=None, processed_df=No
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-def validate_text(text):
-    """텍스트 데이터 검증"""
-    if not isinstance(text, str):
-        return str(text)
-    try:
-        # 여러 단계의 인코딩/디코딩 검증
-        validated = text.encode('utf-8').decode('utf-8')
-        return validated
-    except Exception as e:
-        print(f"Text validation error: {str(e)}")
-        return text
+
 
 
 def process_data(input_df, creator_info_handler, start_date, end_date, 
                 email_user=None, email_password=None,
                 progress_container=None, status_container=None, validation_container=None):
     """데이터를 처리하고 보고서를 생성합니다."""
-    import unicodedata  # 여기에 추가
-
     try:
-        # 입력 데이터프레임 처리 부분
+        # 입력 데이터프레임 복사 및 전처리
         input_df = input_df.copy()
-
-        # 문자열 데이터 인코딩 처리
-        if '동영상 제목' in input_df.columns:
-            input_df['동영상 제목'] = input_df['동영상 제목'].apply(
-                lambda x: x.encode('utf-8').decode('utf-8') if isinstance(x, str) else str(x)
-            )
         
         # NaN 값 처리 및 아이디 정규화
         input_df['아이디'] = input_df['아이디'].fillna('')
