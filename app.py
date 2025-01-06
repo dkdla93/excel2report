@@ -321,18 +321,19 @@ def show_validation_results(original_df, processed_df, creator_info_handler):
 
 def create_video_data(df):
     """데이터프레임에서 비디오 데이터를 추출합니다."""
+    import base64
+    
     video_data = []
-
     for _, row in df.iterrows():
         try:
             if pd.isna(row['동영상 제목']):
                 continue
             
-            # 제목 처리
+            # base64로 인코딩했다가 다시 디코딩
             title = str(row['동영상 제목'])
-            
-            # HTML 엔티티로 인코딩
-            title = title.encode('ascii', 'xmlcharrefreplace').decode('ascii')
+            title_bytes = title.encode('utf-8')
+            title_base64 = base64.b64encode(title_bytes)
+            title = base64.b64decode(title_base64).decode('utf-8')
             
             video_data.append({
                 'title': title,
@@ -341,38 +342,38 @@ def create_video_data(df):
             })
             
         except Exception as e:
-            print(f"데이터 처리 중 오류: {str(e)}")
-            # 오류 발생시 원본 값 사용
+            print(f"Error processing title: {str(e)}")
             video_data.append({
-                'title': str(row['동영상 제목']),
+                'title': '[인코딩 오류]',
                 'views': clean_numeric_value(row['조회수']),
                 'revenue': clean_numeric_value(row['수수료 후 수익'])
             })
+            
     return video_data
 
 
 def generate_html_report(data):
     """HTML 보고서를 생성합니다."""
-    
     try:
         template_path = 'templates/template.html'
         with open(template_path, 'r', encoding='utf-8') as f:
             template_str = f.read()
-            
-        # HTML 엔티티 처리를 위한 함수
-        def safe_text(text):
-            if isinstance(text, str):
-                return text.encode('ascii', 'xmlcharrefreplace').decode('ascii')
-            return str(text)
-            
-        # videoData의 제목 처리
+        
+        # 데이터 검증
         for video in data['videoData']:
-            video['title'] = safe_text(video['title'])
+            video['title'] = validate_text(video['title'])
+            # 디버깅용 출력
+            print(f"Processing title: {video['title']}")
+            print(f"Title bytes: {video['title'].encode('utf-8')}")
         
         template = Template(template_str)
         template.globals['format_number'] = lambda x, decimals=0: "{:,.{}f}".format(float(x), decimals)
         
-        return template.render(**data)
+        # 디버깅용 출력
+        html_content = template.render(**data)
+        print("Generated HTML sample:", html_content[:1000])
+        
+        return html_content
         
     except Exception as e:
         st.error(f"HTML 생성 실패 ({data['creatorName']}): {str(e)}")
@@ -575,7 +576,17 @@ def create_zip_file(reports_data, excel_files, original_df=None, processed_df=No
     zip_buffer.seek(0)
     return zip_buffer.getvalue()
 
-
+def validate_text(text):
+    """텍스트 데이터 검증"""
+    if not isinstance(text, str):
+        return str(text)
+    try:
+        # 여러 단계의 인코딩/디코딩 검증
+        validated = text.encode('utf-8').decode('utf-8')
+        return validated
+    except Exception as e:
+        print(f"Text validation error: {str(e)}")
+        return text
 
 
 def process_data(input_df, creator_info_handler, start_date, end_date, 
@@ -585,17 +596,15 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
     import unicodedata  # 여기에 추가
 
     try:
-        # 입력 데이터프레임 복사 및 전처리
+        # 입력 데이터프레임 처리 부분
         input_df = input_df.copy()
-        
-        # 문자열 컬럼의 인코딩 처리
-        text_columns = ['동영상 제목', '콘텐츠']
-        for col in text_columns:
-            if col in input_df.columns:
-                input_df[col] = input_df[col].apply(lambda x: x.encode('utf-8').decode('utf-8', 'ignore') if isinstance(x, str) else x)
-                # 유니코드 정규화 추가
-                input_df[col] = input_df[col].apply(lambda x: unicodedata.normalize('NFKC', str(x)) if isinstance(x, str) else x)
 
+        # 문자열 데이터 인코딩 처리
+        if '동영상 제목' in input_df.columns:
+            input_df['동영상 제목'] = input_df['동영상 제목'].apply(
+                lambda x: x.encode('utf-8').decode('utf-8') if isinstance(x, str) else str(x)
+            )
+        
         # NaN 값 처리 및 아이디 정규화
         input_df['아이디'] = input_df['아이디'].fillna('')
         input_df['아이디'] = input_df['아이디'].astype(str).str.strip()
