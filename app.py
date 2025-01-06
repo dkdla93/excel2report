@@ -381,39 +381,37 @@ def generate_html_report(data):
         return None
 
 
+
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
         print(f"[DEBUG] PDF 생성 시작 - 크리에이터: {creator_id}")
         
         # 폰트 설정
+        from weasyprint import HTML, CSS
         from weasyprint.text.fonts import FontConfiguration
         font_config = FontConfiguration()
-        print("[DEBUG] 폰트 설정 완료")
         
+        # HTML 직접 생성 (외부 리소스 요청 없이)
+        html_doc = HTML(
+            string=html_content,
+            encoding='utf-8',
+            base_url=None  # base_url 명시적으로 None으로 설정
+        )
+
         # CSS 설정
-        portrait_css = CSS(string="""
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap');
-            
+        css = CSS(string='''
             @page {
                 size: A4 portrait;
                 margin: 8mm;
             }
-            
+
             body {
-                font-family: 'Noto Sans', 'Noto Sans KR', 'Noto Sans JP', 'Noto Sans SC', 'Noto Sans Arabic', sans-serif;
+                font-family: system-ui, -apple-system, sans-serif;
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
             }
-            
-            /* 각 언어별 폰트 지정 */
-            :lang(ko) { font-family: 'Noto Sans KR', sans-serif; }
-            :lang(ja) { font-family: 'Noto Sans JP', sans-serif; }
-            :lang(zh) { font-family: 'Noto Sans SC', sans-serif; }
-            :lang(ar) { font-family: 'Noto Sans Arabic', sans-serif; }
             
             /* RTL(Right-to-Left) 텍스트 지원 */
             [dir="rtl"] { 
@@ -486,181 +484,28 @@ def create_pdf_from_html(html_content, creator_id):
                 margin: 0 !important;
                 vertical-align: middle;
             }
-        """)
-        print("[DEBUG] CSS 설정 완료")
-        
-        # PDF 생성
-        try:
-            pdf_buffer = BytesIO()
-            document = HTML(
-                string=html_content,
-                base_url=None,  # base_url 추가
-                encoding='utf-8'
-            )
-            print("[DEBUG] HTML 객체 생성 완료")
-            
-            document.write_pdf(
-                target=pdf_buffer,  # target 파라미터명 명시
-                stylesheets=[portrait_css],
-                font_config=font_config,
-                optimize_size=('fonts', 'images'),  # 최적화 옵션 추가
-                zoom=1
-            )
-            print("[DEBUG] PDF 생성 완료")
-            
-            pdf_buffer.seek(0)
-            pdf_content = pdf_buffer.getvalue()
-            print(f"[DEBUG] PDF 크기: {len(pdf_content)} bytes")
-            
-            return pdf_content
-            
-        except Exception as pdf_error:
-            print(f"[ERROR] PDF 변환 중 오류 발생: {str(pdf_error)}")
-            print("Traceback:")
-            traceback.print_exc()
-            return None
-            
-    except Exception as e:
-        print(f"[ERROR] 전체 프로세스 오류: {str(e)}")
-        print("Traceback:")
-        traceback.print_exc()
-        return None
-
-
-
-def create_pdf_from_html(html_content, creator_id):
-    """HTML 내용을 PDF로 변환합니다."""
-    try:
-        # WeasyPrint 폰트 설정
-        from weasyprint.text.fonts import FontConfiguration
-        font_config = FontConfiguration()
-        
-        portrait_css = CSS(string="""
-            /* Google Fonts에서 다양한 언어의 Noto Sans 폰트들을 import */
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap');
-            
-            @page {
-                size: A4 portrait;
-                margin: 8mm;
-            }
-            
-            body {
-                font-family: 'Noto Sans', 'Noto Sans KR', 'Noto Sans JP', 'Noto Sans SC', 'Noto Sans Arabic', sans-serif;
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-                -webkit-font-smoothing: antialiased;
-                -moz-osx-font-smoothing: grayscale;
-            }
-            
-            /* 각 언어별 폰트 지정 */
-            :lang(ko) { font-family: 'Noto Sans KR', sans-serif; }
-            :lang(ja) { font-family: 'Noto Sans JP', sans-serif; }
-            :lang(zh) { font-family: 'Noto Sans SC', sans-serif; }
-            :lang(ar) { font-family: 'Noto Sans Arabic', sans-serif; }
-            
-            /* RTL(Right-to-Left) 텍스트 지원 */
-            [dir="rtl"] { 
-                text-align: right; 
-                font-family: 'Noto Sans Arabic', sans-serif;
-            }
-            
-            .report-container {
-                max-width: 100%;
-                padding: 8px;
-            }
-            .header {
-                margin-bottom: 12px;
-            }
-            .header h1 {
-                font-size: 21px !important;
-                margin-bottom: 6px;
-                line-height: 1.2;
-                font-weight: bold;
-            }
-            .header .period {
-                font-size: 13px;
-                margin: 6px 0;
-            }
-            .header .disclaimer {
-                font-size: 11px;
-                margin: 4px 0;
-                line-height: 1.3;
-            }
-            .stats-grid {
-                max-width: 100%;
-                gap: 10px;
-                margin-bottom: 10px;
-            }
-            .stat-card {
-                padding: 10px;
-            }
-            .stat-card h3 {
-                font-size: 13px;
-                margin-bottom: 4px;
-            }
-            .stat-card .value {
-                font-size: 18px;
-            }
-            .earnings-table {
-                margin-top: 10px;
-                font-size: 0.7em;
-                border-spacing: 0;
-                border-collapse: collapse;
-            }
-            .earnings-table th {
-                font-size: 0.95em;
-                padding: 2px 3px;
-                line-height: 1;
-            }
-            .earnings-table td {
-                padding: 1px 3px;
-                line-height: 1;
-            }
-            .earnings-table tr {
-                height: auto !important;
-                border-bottom: 0.5px solid #e9ecef;
-            }
-            .earnings-table tbody tr {
-                margin: 0 !important;
-                padding: 0 !important;
-            }
-            .earnings-table th,
-            .earnings-table td {
-                margin: 0 !important;
-                vertical-align: middle;
-            }
-        """)
-        
-        # WeasyPrint에 URL 핸들러 추가
-        from weasyprint.urls import URLFetcher
-        
-        class CustomURLFetcher(URLFetcher):
-            def fetch(self, url, *args, **kwargs):
-                if url.startswith('https://fonts.googleapis.com/'):
-                    return super().fetch(url, *args, **kwargs)
-                return super().fetch(url, *args, **kwargs)
+        ''')
         
         # PDF 생성
         pdf_buffer = BytesIO()
-        HTML(
-            string=html_content,
-            encoding='utf-8',
-            url_fetcher=CustomURLFetcher()
-        ).write_pdf(
-            pdf_buffer,
-            stylesheets=[portrait_css],
-            font_config=font_config,
-            presentational_hints=True
+        html_doc.write_pdf(
+            target=pdf_buffer,
+            stylesheets=[css],
+            font_config=font_config
         )
-        
         pdf_buffer.seek(0)
-        return pdf_buffer.getvalue()
+
+        # PDF 생성 결과 확인
+        pdf_content = pdf_buffer.getvalue()
+        print(f"[DEBUG] PDF 생성 완료 - 크기: {len(pdf_content)} bytes")
+        
+        return pdf_content
         
     except Exception as e:
-        print(f"PDF 생성 중 오류 발생: {str(e)}")
+        print(f"[ERROR] PDF 생성 중 오류 발생: {str(e)}")
         traceback.print_exc()
         return None
+
 
 
 def create_validation_excel(original_df, processed_df, creator_info_handler):
