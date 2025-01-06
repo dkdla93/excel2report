@@ -7,3 +7,7 @@ libffi-dev
 shared-mime-info
 fonts-nanum
 fonts-noto-cjk
+fonts-noto
+fonts-noto-arabic
+
+libpango1.0-0
