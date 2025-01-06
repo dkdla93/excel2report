@@ -329,7 +329,7 @@ def create_video_data(df):
         video_data.append({
             'title': str(row['동영상 제목']),
             'views': clean_numeric_value(row['조회수']),
-            'revenue': clean_numeric_value(row['수수료 제외 후 수익'])  # 수수료 제외 후 수익만 사용
+            'revenue': clean_numeric_value(row['수수료 후 수익'])  # 수수료 제외 후 수익만 사용
         })
     return video_data
 
@@ -341,7 +341,8 @@ def generate_html_report(data):
             template_str = f.read()
         
         template = Template(template_str)
-        template.globals['format_number'] = lambda x: "{:,}".format(int(x))
+        template.globals['format_number'] = lambda x, decimals=0: "{:,.{}f}".format(float(x), decimals)
+
         
         return template.render(**data)
         
@@ -634,7 +635,10 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 
                 processed_full_data = pd.concat([processed_full_data, creator_data])
                 
-                # 상위 50개 데이터 필터링
+                # 수수료 적용 수익 계산
+                creator_data['수수료 후 수익'] = creator_data['대략적인 파트너 수익 (KRW)'] * commission_rate
+                
+                # 상위 50개 데이터 필터링 (조회수)
                 filtered_data = creator_data.nlargest(50, '조회수').copy()
                 
                 # 총계 행 추가
@@ -642,7 +646,7 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                     '콘텐츠': '총계',
                     '조회수': total_views,
                     '대략적인 파트너 수익 (KRW)': total_revenue,
-                    '수수료 제외 후 수익': total_revenue_after
+                    '수수료 후 수익': total_revenue_after
                 }, name='total')
                 filtered_data = pd.concat([filtered_data, pd.DataFrame([total_row])], ignore_index=True)
                 
