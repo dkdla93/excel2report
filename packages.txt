@@ -8,6 +8,6 @@ shared-mime-info
 fonts-nanum
 fonts-noto-cjk
 fonts-noto
-fonts-noto-arabic
+fonts-noto-extra
 
 libpango1.0-0
