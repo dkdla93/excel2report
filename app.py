@@ -383,35 +383,40 @@ def generate_html_report(data):
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
+        # WeasyPrint 폰트 설정
+        from weasyprint.text.fonts import FontConfiguration
+        font_config = FontConfiguration()
+        
         portrait_css = CSS(string="""
-            @font-face {
-                font-family: 'NanumGothic';
-                src: local('NanumGothic');
-            }
-            @font-face {
-                font-family: 'Noto Sans';
-                src: local('Noto Sans');
-            }
-            @font-face {
-                font-family: 'Noto Sans CJK JP';
-                src: local('Noto Sans CJK JP');
-            }
-            @font-face {
-                font-family: 'Noto Sans CJK SC';
-                src: local('Noto Sans CJK SC');
-            }
+            /* Google Fonts에서 다양한 언어의 Noto Sans 폰트들을 import */
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap');
+            
             @page {
                 size: A4 portrait;
                 margin: 8mm;
             }
+            
             body {
-                font-family: 'NanumGothic', 'Noto Sans', 'Noto Sans CJK JP', 'Noto Sans CJK SC', sans-serif;
+                font-family: 'Noto Sans', 'Noto Sans KR', 'Noto Sans JP', 'Noto Sans SC', 'Noto Sans Arabic', sans-serif;
                 margin: 0;
                 padding: 0;
                 box-sizing: border-box;
                 -webkit-font-smoothing: antialiased;
                 -moz-osx-font-smoothing: grayscale;
             }
+            
+            /* 각 언어별 폰트 지정 */
+            :lang(ko) { font-family: 'Noto Sans KR', sans-serif; }
+            :lang(ja) { font-family: 'Noto Sans JP', sans-serif; }
+            :lang(zh) { font-family: 'Noto Sans SC', sans-serif; }
+            :lang(ar) { font-family: 'Noto Sans Arabic', sans-serif; }
+            
+            /* RTL(Right-to-Left) 텍스트 지원 */
+            [dir="rtl"] { 
+                text-align: right; 
+                font-family: 'Noto Sans Arabic', sans-serif;
+            }
+            
             .report-container {
                 max-width: 100%;
                 padding: 8px;
@@ -464,14 +469,6 @@ def create_pdf_from_html(html_content, creator_id):
                 padding: 1px 3px;
                 line-height: 1;
             }
-            .earnings-table th:first-child,
-            .earnings-table td:first-child {
-                padding-left: 0;
-            }
-            .earnings-table th:last-child,
-            .earnings-table td:last-child {
-                padding-right: 0;
-            }
             .earnings-table tr {
                 height: auto !important;
                 border-bottom: 0.5px solid #e9ecef;
@@ -487,23 +484,36 @@ def create_pdf_from_html(html_content, creator_id):
             }
         """)
         
-        # WeasyPrint 설정에 폰트 설정 추가
-        from weasyprint.text.fonts import FontConfiguration
-        font_config = FontConfiguration()
+        # WeasyPrint에 URL 핸들러 추가
+        from weasyprint.urls import URLFetcher
         
+        class CustomURLFetcher(URLFetcher):
+            def fetch(self, url, *args, **kwargs):
+                if url.startswith('https://fonts.googleapis.com/'):
+                    return super().fetch(url, *args, **kwargs)
+                return super().fetch(url, *args, **kwargs)
+        
+        # PDF 생성
         pdf_buffer = BytesIO()
-        HTML(string=html_content).write_pdf(
+        HTML(
+            string=html_content,
+            encoding='utf-8',
+            url_fetcher=CustomURLFetcher()
+        ).write_pdf(
             pdf_buffer,
             stylesheets=[portrait_css],
             font_config=font_config,
             presentational_hints=True
         )
+        
         pdf_buffer.seek(0)
         return pdf_buffer.getvalue()
         
     except Exception as e:
-        print(f"PDF 생성 중 오류 발생: {str(e)}")  # 디버깅을 위한 오류 출력 추가
+        print(f"PDF 생성 중 오류 발생: {str(e)}")
+        traceback.print_exc()
         return None
+
 
 def create_validation_excel(original_df, processed_df, creator_info_handler):
     """검증 결과를 담은 엑셀 파일을 생성합니다."""
