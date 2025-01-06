@@ -322,31 +322,27 @@ def show_validation_results(original_df, processed_df, creator_info_handler):
 def create_video_data(df):
     """데이터프레임에서 비디오 데이터를 추출합니다."""
     video_data = []
+
     for _, row in df.iterrows():
-        if pd.isna(row['동영상 제목']):  # 제목이 없는 행은 건너뛰기
-            continue
-        
         try:
-            # 원본 제목의 바이트 표현 확인
+            if pd.isna(row['동영상 제목']):
+                continue
+            
+            # 제목 처리
             title = str(row['동영상 제목'])
-            print(f"Original title bytes: {title.encode('utf-8')}")
             
-            # 유니코드 정규화
-            import unicodedata
-            title = unicodedata.normalize('NFKC', title)
-            
-            # 특수 문자 처리
-            title = title.encode('utf-8').decode('utf-8', 'ignore')
-            print(f"Processed title: {title}")
+            # HTML 엔티티로 인코딩
+            title = title.encode('ascii', 'xmlcharrefreplace').decode('ascii')
             
             video_data.append({
                 'title': title,
                 'views': clean_numeric_value(row['조회수']),
                 'revenue': clean_numeric_value(row['수수료 후 수익'])
             })
+            
         except Exception as e:
-            print(f"Title processing error: {str(e)}")
-            # 에러 발생 시 원본 제목 사용
+            print(f"데이터 처리 중 오류: {str(e)}")
+            # 오류 발생시 원본 값 사용
             video_data.append({
                 'title': str(row['동영상 제목']),
                 'views': clean_numeric_value(row['조회수']),
@@ -357,28 +353,21 @@ def create_video_data(df):
 
 def generate_html_report(data):
     """HTML 보고서를 생성합니다."""
-    import unicodedata  # 여기에 추가
-
+    
     try:
         template_path = 'templates/template.html'
         with open(template_path, 'r', encoding='utf-8') as f:
             template_str = f.read()
-        
-        # 데이터 인코딩 처리
-        def encode_text(text):
-            try:
-                if isinstance(text, str):
-                    # 다중 인코딩/디코딩 시도
-                    text = text.encode('utf-8').decode('utf-8', 'ignore')
-                    text = unicodedata.normalize('NFKC', text)
-                return text
-            except Exception as e:
-                print(f"Text encoding error: {str(e)}")
-                return str(text)
-        
-        # videoData의 title 인코딩 처리
+            
+        # HTML 엔티티 처리를 위한 함수
+        def safe_text(text):
+            if isinstance(text, str):
+                return text.encode('ascii', 'xmlcharrefreplace').decode('ascii')
+            return str(text)
+            
+        # videoData의 제목 처리
         for video in data['videoData']:
-            video['title'] = encode_text(video['title'])
+            video['title'] = safe_text(video['title'])
         
         template = Template(template_str)
         template.globals['format_number'] = lambda x, decimals=0: "{:,.{}f}".format(float(x), decimals)
