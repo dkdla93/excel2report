@@ -596,12 +596,6 @@ def process_data(input_df, creator_info_handler, start_date, end_date,
                 # 유니코드 정규화 추가
                 input_df[col] = input_df[col].apply(lambda x: unicodedata.normalize('NFKC', str(x)) if isinstance(x, str) else x)
 
-        # 문자열 컬럼의 인코딩 처리 추가
-        text_columns = ['동영상 제목', '콘텐츠']  # 텍스트 컬럼 목록
-        for col in text_columns:
-            if col in input_df.columns:
-                input_df[col] = input_df[col].apply(lambda x: x.encode('utf-8').decode('utf-8') if isinstance(x, str) else x)
-
         # NaN 값 처리 및 아이디 정규화
         input_df['아이디'] = input_df['아이디'].fillna('')
         input_df['아이디'] = input_df['아이디'].astype(str).str.strip()
