@@ -380,25 +380,26 @@ def generate_html_report(data):
         st.write(traceback.format_exc())
         return None
 
+
 def create_pdf_from_html(html_content, creator_id):
     """HTML 내용을 PDF로 변환합니다."""
     try:
-        print(f"PDF 생성 시작: {creator_id}")  # 디버깅 로그 추가
+        print(f"[DEBUG] PDF 생성 시작 - 크리에이터: {creator_id}")
         
-        # WeasyPrint 폰트 설정
+        # 폰트 설정
         from weasyprint.text.fonts import FontConfiguration
         font_config = FontConfiguration()
+        print("[DEBUG] 폰트 설정 완료")
         
+        # CSS 설정
         portrait_css = CSS(string="""
-            /* Google Fonts에서 다양한 언어의 Noto Sans 폰트들을 import */
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&family=Noto+Sans+KR:wght@400;700&family=Noto+Sans+JP:wght@400;700&family=Noto+Sans+SC:wght@400;700&family=Noto+Sans+Arabic:wght@400;700&display=swap');
-            
             
             @page {
                 size: A4 portrait;
                 margin: 8mm;
             }
-
+            
             body {
                 font-family: 'Noto Sans', 'Noto Sans KR', 'Noto Sans JP', 'Noto Sans SC', 'Noto Sans Arabic', sans-serif;
                 margin: 0;
@@ -486,30 +487,45 @@ def create_pdf_from_html(html_content, creator_id):
                 vertical-align: middle;
             }
         """)
+        print("[DEBUG] CSS 설정 완료")
         
         # PDF 생성
-        print("PDF 생성 시작...")  # 디버깅 로그 추가
-        pdf_buffer = BytesIO()
-        
-        HTML(
-            string=html_content,
-            encoding='utf-8'
-        ).write_pdf(
-            pdf_buffer,
-            stylesheets=[portrait_css],
-            font_config=font_config,
-            presentational_hints=True
-        )
-        
-        print("PDF 생성 완료")  # 디버깅 로그 추가
-        
-        pdf_buffer.seek(0)
-        return pdf_buffer.getvalue()
-        
+        try:
+            pdf_buffer = BytesIO()
+            document = HTML(
+                string=html_content,
+                base_url=None,  # base_url 추가
+                encoding='utf-8'
+            )
+            print("[DEBUG] HTML 객체 생성 완료")
+            
+            document.write_pdf(
+                target=pdf_buffer,  # target 파라미터명 명시
+                stylesheets=[portrait_css],
+                font_config=font_config,
+                optimize_size=('fonts', 'images'),  # 최적화 옵션 추가
+                zoom=1
+            )
+            print("[DEBUG] PDF 생성 완료")
+            
+            pdf_buffer.seek(0)
+            pdf_content = pdf_buffer.getvalue()
+            print(f"[DEBUG] PDF 크기: {len(pdf_content)} bytes")
+            
+            return pdf_content
+            
+        except Exception as pdf_error:
+            print(f"[ERROR] PDF 변환 중 오류 발생: {str(pdf_error)}")
+            print("Traceback:")
+            traceback.print_exc()
+            return None
+            
     except Exception as e:
-        print(f"PDF 생성 중 오류 발생: {str(e)}")
+        print(f"[ERROR] 전체 프로세스 오류: {str(e)}")
+        print("Traceback:")
         traceback.print_exc()
         return None
+
 
 
 def create_pdf_from_html(html_content, creator_id):
