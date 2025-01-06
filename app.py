@@ -325,7 +325,16 @@ def create_video_data(df):
     for _, row in df.iterrows():
         if pd.isna(row['동영상 제목']):  # 제목이 없는 행은 건너뛰기
             continue
-            
+        
+         # 유니코드 정규화 처리
+        try:
+            import unicodedata
+            title = str(row['동영상 제목'])
+            title = unicodedata.normalize('NFKC', title)
+        except Exception as e:
+            print(f"제목 정규화 중 오류 발생: {str(e)}")
+            title = str(row['동영상 제목'])
+
         video_data.append({
             'title': str(row['동영상 제목']),
             'views': clean_numeric_value(row['조회수']),
